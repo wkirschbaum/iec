@@ -27,8 +27,15 @@ defmodule IecWeb.Router do
       live "/map", MapLive
       live "/trends", TrendsLive
       live "/about", AboutLive
+      live "/status", StatusLive
       live "/parties/:id", PartyLive
     end
+  end
+
+  scope "/", IecWeb do
+    pipe_through :api
+
+    get "/health", HealthController, :show
   end
 
   # Other scopes may use custom stacks.

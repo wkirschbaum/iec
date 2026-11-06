@@ -81,6 +81,8 @@ To start again from nothing: `mix ecto.reset`.
 - `/movers`: biggest winners and losers by vote share swing, wards and council
   majorities changing hands per party, and the biggest local surges and collapses
 - `/changes`: every change, filterable by level
+- `/status`: the feeds, what has been imported and the server, live; `/health` gives a
+  short JSON summary for uptime checks
 - `/about`: what this is and is not, data sources and credits, how it works and how to
   read it
 

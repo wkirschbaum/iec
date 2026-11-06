@@ -36,7 +36,7 @@ kill_signal = "SIGTERM"
     interval = "30s"
     method = "GET"
     timeout = "10s"
-    path = "/"
+    path = "/health"
     # Fly's proxy normally adds this; without it Phoenix redirects the check to HTTPS.
     [http_service.checks.headers]
       X-Forwarded-Proto = "https"

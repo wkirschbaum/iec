@@ -263,7 +263,12 @@ defmodule IecWeb.Layouts do
 
   defp feed_indicator(assigns) do
     ~H"""
-    <div id="feed-status" class="flex items-center gap-1.5">
+    <.link
+      navigate={~p"/status"}
+      id="feed-status"
+      class="flex items-center gap-1.5 hover:underline"
+      title="Feed status"
+    >
       <span class={[
         "inline-block size-2 rounded-full",
         cond do
@@ -279,7 +284,7 @@ defmodule IecWeb.Layouts do
           · {@status.failing}/{@status.feeds} failing
         </span>
       </span>
-    </div>
+    </.link>
     """
   end
 
