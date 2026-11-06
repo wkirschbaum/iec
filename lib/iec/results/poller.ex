@@ -2,8 +2,8 @@ defmodule Iec.Results.Poller do
   @moduledoc """
   Polls one IEC feed file. Each request is conditional on the previous response's
   validators, and the next one is scheduled for when the edge copy expires
-  (`Cache-Control: max-age` minus `Age`), or after `:minimum_interval` if that is longer. New content is ingested and announced; failures
-  back off from 30 seconds to 5 minutes.
+  (`Cache-Control: max-age` minus `Age`), or after `:minimum_interval` if that is longer.
+  New content is ingested and announced; failures back off from 30 seconds to 5 minutes.
 
   Each poller keeps its latest status as its Registry value, so `statuses/0` reads them
   without waiting on a poller that is mid-download.
@@ -13,6 +13,7 @@ defmodule Iec.Results.Poller do
   require Logger
 
   alias Iec.{Parties, Results}
+  alias Iec.Parties.Import
   alias Iec.Results.Feed
 
   @registry Iec.Results.Registry
@@ -115,7 +116,7 @@ defmodule Iec.Results.Poller do
   end
 
   defp store(%{kind: :party} = feed, data, body, validators) do
-    with {:ok, changed} <- Parties.ingest(feed, data, body, validators) do
+    with {:ok, changed} <- Import.ingest(feed, data, body, validators) do
       if changed > 0, do: Parties.broadcast_changed(feed.party_id)
       {:ok, changed}
     end
@@ -126,7 +127,7 @@ defmodule Iec.Results.Poller do
       if snapshots != [] do
         Logger.info("#{feed.name}: #{length(snapshots)} areas changed")
         Results.broadcast({:results_changed, Enum.map(snapshots, & &1.id)})
-        if feed.kind == :national, do: Parties.follow_national_parties()
+        if feed.kind == :national, do: Import.follow_national_parties()
       end
 
       {:ok, length(snapshots)}

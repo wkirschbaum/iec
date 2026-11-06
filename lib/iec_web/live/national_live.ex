@@ -7,10 +7,10 @@ defmodule IecWeb.NationalLive do
 
   alias Iec.Results
   alias Iec.Results.Change
-  alias IecWeb.{ChangeDigest, Narrative, TableRows, Trends}
+  alias IecWeb.{ChangeDigest, LiveUpdates, Narrative, TableRows, Trends}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results]}
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
@@ -24,13 +24,8 @@ defmodule IecWeb.NationalLive do
      |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
-
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(_assigns), do: {__MODULE__}
+  @impl LiveUpdates
+  def refresh(socket), do: LiveUpdates.assign_cached(socket, {__MODULE__}, &load/1)
 
   defp load(assigns) do
     %{previous_year: previous_year, parties: parties} = assigns
@@ -44,37 +39,26 @@ defmodule IecWeb.NationalLive do
 
     national_history = Results.list_snapshots_by_election(:national, 0)
 
-    Map.new(
+    %{
       national: national,
       share_points: Trends.points_by_party(national_history),
       # Each province's parties across elections, for the cards' sparklines.
-      province_points:
-        Map.new(Results.list_snapshots_by_election(:province), fn {province_id, snapshots} ->
-          {province_id, Trends.points_by_party(snapshots)}
-        end),
+      province_points: Trends.points_by_area(Results.list_snapshots_by_election(:province)),
       summary: Narrative.summary(national, party_rows, parties, previous_year),
-      trend:
-        Trends.series(national_history, :vote_percentage, parties,
-          threshold: 4,
-          limit: 5
-        ),
-      counting:
-        national != nil and
-          national.voting_districts_complete < national.voting_districts_expected,
+      trend: Trends.series(national_history, :vote_percentage, parties, threshold: 4, limit: 5),
+      counting: counting?(national),
       party_rows: party_rows,
       standings: party_rows |> Enum.filter(&(&1.party_id >= 0)) |> Enum.take(8),
       province_rows:
-        TableRows.area_rows(
-          Results.list_latest_snapshots(level: :province),
-          previous_provinces,
-          parties
-        ),
+        Results.list_latest_snapshots(level: :province)
+        |> TableRows.area_rows(previous_provinces, parties)
+        |> Enum.sort_by(& &1.name),
       highlights:
         Results.list_changes(changed_only: true, limit: 300)
         |> Enum.map(&Change.compare/1)
         |> ChangeDigest.highlights()
         |> Enum.take(6)
-    )
+    }
   end
 
   @impl Phoenix.LiveView
@@ -99,32 +83,10 @@ defmodule IecWeb.NationalLive do
 
       <section :if={@national} class="panel space-y-8 p-5 sm:p-7">
         <.vote_share_bar rows={@party_rows} parties={@parties} previous_year={@previous_year} />
-        <div class="grid grid-cols-2 gap-x-6 gap-y-6 border-t border-base-300 pt-6 lg:grid-cols-5">
-          <.kpi
-            label="Districts counted"
-            value={
-              format_progress(
-                @national.voting_districts_complete,
-                @national.voting_districts_expected
-              )
-            }
-          >
-            {format_number(@national.voting_districts_complete)} of {format_number(
-              @national.voting_districts_expected
-            )}
-          </.kpi>
-          <.kpi label="Votes counted" value={format_compact(@national.total_votes_cast)}>
-            of {format_compact(@national.registered_voters)} registered
-          </.kpi>
-          <.kpi
-            label="Councils decided"
-            value={"#{@national.municipalities_complete} / #{@national.municipalities_expected}"}
-          >
-            {@national.majority_councils} with a majority
-          </.kpi>
-          <.kpi label="Hung councils" value={format_number(@national.hung_councils)}>
-            no party over half the seats
-          </.kpi>
+        <div class="grid grid-cols-2 gap-6 border-t border-base-300 pt-6 lg:grid-cols-5">
+          <.count_kpis snapshot={@national}>
+            <:votes_note>of {format_compact(@national.registered_voters)} registered</:votes_note>
+          </.count_kpis>
           <.kpi
             label="Wards declared"
             value={format_number(@national.wards_complete)}
@@ -158,38 +120,12 @@ defmodule IecWeb.NationalLive do
           </.section_heading>
           <ol class="panel divide-y divide-base-300 overflow-hidden">
             <li :for={{row, rank} <- Enum.with_index(@standings, 1)}>
-              <.link
-                navigate={~p"/parties/#{row.party_id}"}
-                class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-200/70"
-              >
-                <span class="w-4 text-right text-xs tabular-nums text-base-content/40">{rank}</span>
-                <span
-                  class="h-8 w-1 rounded-full"
-                  style={"background-color: #{party_colour(@parties, row)}"}
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate font-medium">{row.party}</span>
-                  <span class="block text-xs tabular-nums text-base-content/55">
-                    {format_number(row.seats)} seats
-                  </span>
-                </span>
-                <.sparkline
-                  points={@share_points[row.party_id] || []}
-                  colour={party_colour(@parties, row)}
-                  label={row.party}
-                  class="hidden h-7 w-16 sm:block"
-                />
-                <span class="text-right">
-                  <span class="block font-serif text-xl tabular-nums leading-none">
-                    {format_percentage(row.share)}
-                  </span>
-                  <.swing_chip value={row.swing} class="mt-1" />
-                </span>
-                <.icon
-                  name="hero-chevron-right-micro"
-                  class="size-4 text-base-content/30 transition-transform group-hover:translate-x-0.5"
-                />
-              </.link>
+              <.standing
+                row={row}
+                rank={rank}
+                points={@share_points[row.party_id] || []}
+                parties={@parties}
+              />
             </li>
           </ol>
         </div>
@@ -218,7 +154,7 @@ defmodule IecWeb.NationalLive do
         </.section_heading>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <.province_card
-            :for={province <- Enum.sort_by(@province_rows, & &1.name)}
+            :for={province <- @province_rows}
             province={province}
             points={get_in(@province_points, [province.area_id, province.leader_id]) || []}
             parties={@parties}
@@ -227,20 +163,7 @@ defmodule IecWeb.NationalLive do
         </div>
       </section>
 
-      <section class="space-y-4">
-        <.section_heading title="Highlights">
-          <:subtitle>Leads changing hands and councils decided</:subtitle>
-          <:actions>
-            <.link navigate={~p"/changes"} class="link-hover link">All changes →</.link>
-          </:actions>
-        </.section_heading>
-        <p :if={@highlights == []} class="text-sm text-base-content/60">
-          No lead has changed hands since start-up.
-        </p>
-        <ul :if={@highlights != []} class="panel divide-y divide-base-300">
-          <.highlight :for={event <- @highlights} event={event} parties={@parties} />
-        </ul>
-      </section>
+      <.highlights highlights={@highlights} parties={@parties} />
 
       <section :if={@national} class="space-y-4">
         <.section_heading title="All parties">
@@ -261,17 +184,60 @@ defmodule IecWeb.NationalLive do
     """
   end
 
+  attr :row, :map, required: true, doc: "a party row"
+  attr :rank, :integer, required: true
+  attr :points, :list, required: true, doc: "its share in each election"
+  attr :parties, :map, required: true
+
+  # A party in the standings: its share, seats, swing and the long run as a sparkline.
+  defp standing(assigns) do
+    assigns = assign(assigns, :colour, party_colour(assigns.parties, assigns.row))
+
+    ~H"""
+    <.link_row navigate={~p"/parties/#{@row.party_id}"} class="py-3">
+      <span class="w-4 text-right text-xs tabular-nums text-base-content/40">{@rank}</span>
+      <span class="h-8 w-1 rounded-full" style={"background-color: #{@colour}"} />
+      <span class="min-w-0 flex-1">
+        <span class="block truncate font-medium">{@row.party}</span>
+        <span class="block text-xs tabular-nums text-base-content/55">
+          {format_number(@row.seats)} seats
+        </span>
+      </span>
+      <.sparkline
+        points={@points}
+        colour={@colour}
+        label={@row.party}
+        class="hidden h-7 w-16 sm:block"
+      />
+      <span class="text-right">
+        <span class="block font-serif text-xl tabular-nums leading-none">
+          {format_percentage(@row.share)}
+        </span>
+        <.swing_chip value={@row.swing} class="mt-1" />
+      </span>
+    </.link_row>
+    """
+  end
+
   attr :province, :map, required: true
   attr :points, :list, default: [], doc: "the leader's share in each election"
   attr :parties, :map, required: true
   attr :previous_year, :integer, required: true
 
   defp province_card(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :colour,
+        assigns.province.leader_id &&
+          party_colour(assigns.parties, %{party_id: assigns.province.leader_id})
+      )
+
     ~H"""
-    <.link
+    <.link_card
       navigate={~p"/provinces/#{@province.area_id}"}
       id={"province-card-#{@province.area_id}"}
-      class="panel group block space-y-4 p-5 transition-all hover:-translate-y-0.5 hover:border-base-content/20 hover:shadow-lg"
+      class="block space-y-4 p-5"
     >
       <div class="flex items-start justify-between gap-3">
         <h3 class="text-lg font-medium leading-tight">{@province.name}</h3>
@@ -283,19 +249,15 @@ defmodule IecWeb.NationalLive do
         <div>
           <div class="eyebrow">Leading</div>
           <div class="mt-1 flex items-center gap-2">
-            <span
-              :if={@province.leader_id}
-              class="size-3 rounded-full"
-              style={"background-color: #{party_colour(@parties, %{party_id: @province.leader_id})}"}
-            />
+            <span :if={@colour} class="size-3 rounded-full" style={"background-color: #{@colour}"} />
             <span class="font-medium">{@province.leader || "–"}</span>
           </div>
         </div>
         <div class="flex items-end gap-3">
           <.sparkline
-            :if={@province.leader_id}
+            :if={@colour}
             points={@points}
-            colour={party_colour(@parties, %{party_id: @province.leader_id})}
+            colour={@colour}
             label={@province.leader}
             class="mb-0.5 h-7 w-16"
           />
@@ -306,15 +268,16 @@ defmodule IecWeb.NationalLive do
       </div>
       <.mini_share_bar segments={@province.segments} parties={@parties} />
       <div class="flex items-center justify-between text-xs text-base-content/55">
-        <span>{@previous_year}: {@province.previous_leader || "–"} {format_percentage(
-          @province.previous_share
-        )}</span>
+        <span>
+          {@previous_year}: {@province.previous_leader || "–"}
+          {format_percentage(@province.previous_share)}
+        </span>
         <.icon
           name="hero-arrow-right-micro"
           class="size-4 transition-transform group-hover:translate-x-0.5"
         />
       </div>
-    </.link>
+    </.link_card>
     """
   end
 end

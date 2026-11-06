@@ -6,10 +6,10 @@ defmodule IecWeb.ChangesLive do
 
   alias Iec.Results
   alias Iec.Results.Change
-  alias IecWeb.ChangeDigest
+  alias IecWeb.{ChangeDigest, LiveUpdates}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results]}
 
   @page_size 100
   @max_limit 2_000
@@ -32,13 +32,9 @@ defmodule IecWeb.ChangesLive do
      |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
-
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(assigns), do: {__MODULE__, assigns.view, assigns.level, assigns.limit}
+  @impl LiveUpdates
+  def refresh(%{assigns: %{view: view, level: level, limit: limit}} = socket),
+    do: LiveUpdates.assign_cached(socket, {__MODULE__, view, level, limit}, &load/1)
 
   defp load(assigns) do
     %{view: view, level: level, limit: limit} = assigns
@@ -49,11 +45,11 @@ defmodule IecWeb.ChangesLive do
       Results.list_changes(filters ++ [limit: if(view == :all, do: limit + 1, else: limit * 4)])
       |> Enum.map(&Change.compare/1)
 
-    Map.new(
+    %{
       changes: Enum.take(changes, limit),
       more: view == :all and length(changes) > limit,
       rounds: if(view == :highlights, do: ChangeDigest.rounds(changes), else: [])
-    )
+    }
   end
 
   @impl Phoenix.LiveView
@@ -63,16 +59,15 @@ defmodule IecWeb.ChangesLive do
   end
 
   def handle_event("toggle_round", %{"round" => round}, socket) do
-    {:noreply,
-     update(socket, :open_rounds, fn open ->
-       if MapSet.member?(open, round),
-         do: MapSet.delete(open, round),
-         else: MapSet.put(open, round)
-     end)}
+    {:noreply, update(socket, :open_rounds, &toggle(&1, round))}
   end
 
   # Anything else (a stale or crafted event) changes nothing.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  defp toggle(set, member) do
+    if MapSet.member?(set, member), do: MapSet.delete(set, member), else: MapSet.put(set, member)
+  end
 
   defp areas(1), do: "1 area"
   defp areas(count), do: "#{count} areas"
@@ -136,55 +131,16 @@ defmodule IecWeb.ChangesLive do
         </.segmented>
       </div>
 
-      <p :if={@changes == []} class="text-base-content/60">Nothing has moved since start-up.</p>
+      <.empty :if={@changes == []}>Nothing has moved since start-up.</.empty>
 
       <ol :if={@view == :highlights} class="relative space-y-4 border-l border-base-300 pl-6">
         <li :for={round <- @rounds} id={round.id} class="relative">
           <span class="absolute -left-[1.85rem] top-5 size-3 rounded-full border-2 border-base-100 bg-primary" />
-          <div class="panel overflow-hidden">
-            <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pt-4">
-              <span class="font-serif text-xl tabular-nums">{format_clock(round.at)}</span>
-              <span class="text-sm tabular-nums text-base-content/60">
-                {areas(round.areas)} updated
-                <span :if={round.voting_districts}>
-                  · {format_delta(round.voting_districts, :count)} voting districts
-                </span>
-                <span :if={round.votes}>· {format_delta(round.votes, :count)} votes</span>
-              </span>
-            </div>
-            <ul
-              :if={round.events != []}
-              class="mt-2 divide-y divide-base-300 border-t border-base-300"
-            >
-              <.highlight :for={event <- round.events} event={event} parties={@parties} />
-            </ul>
-            <p :if={round.events == []} class="px-5 pt-1 text-sm text-base-content/55">
-              Routine count updates; no lead changed hands.
-            </p>
-            <button
-              type="button"
-              phx-click="toggle_round"
-              phx-value-round={round.id}
-              class="flex w-full items-center gap-2 px-5 py-3 text-left text-sm text-base-content/70 transition-colors hover:bg-base-200/60 hover:text-base-content"
-            >
-              <.icon
-                name="hero-chevron-right-micro"
-                class={[
-                  "size-4 transition-transform",
-                  MapSet.member?(@open_rounds, round.id) && "rotate-90"
-                ]}
-              />
-              {if MapSet.member?(@open_rounds, round.id), do: "Hide", else: "Show"} {the_areas(
-                round.areas
-              )}
-            </button>
-            <ul
-              :if={MapSet.member?(@open_rounds, round.id)}
-              class="divide-y divide-base-300 border-t border-base-300 px-5"
-            >
-              <.change_entry :for={change <- round.changes} change={change} parties={@parties} />
-            </ul>
-          </div>
+          <.update_round
+            round={round}
+            open={MapSet.member?(@open_rounds, round.id)}
+            parties={@parties}
+          />
         </li>
       </ol>
 
@@ -198,6 +154,49 @@ defmodule IecWeb.ChangesLive do
         Load more
       </button>
     </Layouts.app>
+    """
+  end
+
+  attr :round, :map, required: true, doc: "from IecWeb.ChangeDigest.rounds/1"
+  attr :open, :boolean, required: true, doc: "showing every area's change"
+  attr :parties, :map, required: true
+
+  # One update round: when, how much moved, its notable events, and every area folded.
+  defp update_round(assigns) do
+    ~H"""
+    <div class="panel overflow-hidden">
+      <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pt-4">
+        <span class="font-serif text-xl tabular-nums">{format_clock(@round.at)}</span>
+        <span class="text-sm tabular-nums text-base-content/60">
+          {areas(@round.areas)} updated
+          <span :if={@round.voting_districts}>
+            · {format_delta(@round.voting_districts, :count)} voting districts
+          </span>
+          <span :if={@round.votes}>· {format_delta(@round.votes, :count)} votes</span>
+        </span>
+      </div>
+      <ul :if={@round.events != []} class="mt-2 divide-y divide-base-300 border-t border-base-300">
+        <.highlight :for={event <- @round.events} event={event} parties={@parties} />
+      </ul>
+      <p :if={@round.events == []} class="px-5 pt-1 text-sm text-base-content/55">
+        Routine count updates; no lead changed hands.
+      </p>
+      <button
+        type="button"
+        phx-click="toggle_round"
+        phx-value-round={@round.id}
+        class="flex w-full items-center gap-2 px-5 py-3 text-left text-sm text-base-content/70 transition-colors hover:bg-base-200/60 hover:text-base-content"
+      >
+        <.icon
+          name="hero-chevron-right-micro"
+          class={["size-4 transition-transform", @open && "rotate-90"]}
+        />
+        {if @open, do: "Hide", else: "Show"} {the_areas(@round.areas)}
+      </button>
+      <ul :if={@open} class="divide-y divide-base-300 border-t border-base-300 px-5">
+        <.change_entry :for={change <- @round.changes} change={change} parties={@parties} />
+      </ul>
+    </div>
     """
   end
 end

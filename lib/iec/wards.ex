@@ -5,13 +5,14 @@ defmodule Iec.Wards do
 
   The IEC names a ward only by its municipality and number (and an eight-digit ward id),
   so that is what a search matches: "Tshwane 45", "EC153 18", "ward 7 Drakenstein" or
-  "21503018". It knows no suburbs or street names.
+  "21503018". Towns and suburbs come from OpenStreetMap (`Iec.Places`), each in the
+  ward that holds it; streets are not known.
   """
 
   import Ecto.Query
 
-  alias Iec.Repo
-  alias Iec.Results.{Snapshot, Ward}
+  alias Iec.{Repo, Results}
+  alias Iec.Results.Ward
   alias Iec.Wards.NameMatch
 
   # Words people put around a ward number that name no municipality ("wyk" is Afrikaans).
@@ -26,8 +27,8 @@ defmodule Iec.Wards do
   A ward whose municipality has no results yet has nil names.
   """
   def list_directory do
-    municipalities = area_names(:municipality)
-    provinces = area_names(:province)
+    municipalities = Results.list_area_summaries(:municipality)
+    province_names = Results.list_area_names(:province)
 
     Repo.all(from ward in Ward, order_by: ward.id)
     |> Enum.map(fn ward ->
@@ -40,25 +41,10 @@ defmodule Iec.Wards do
         municipality_id: ward.municipality_id,
         municipality_name: municipality && municipality.name,
         province_id: province_id,
-        province_name: province_id && provinces[province_id] && provinces[province_id].name
+        province_name: province_names[province_id]
       }
     end)
     |> Enum.sort_by(&{&1.municipality_name || "", &1.ward_number})
-  end
-
-  defp area_names(level) do
-    Repo.all(
-      from snapshot in Snapshot,
-        where: snapshot.election == ^Iec.Results.live_year() and snapshot.level == ^level,
-        distinct: snapshot.area_id,
-        order_by: [asc: snapshot.area_id, desc: snapshot.id],
-        select: %{
-          id: snapshot.area_id,
-          name: snapshot.area_name,
-          province_id: snapshot.province_id
-        }
-    )
-    |> Map.new(&{&1.id, &1})
   end
 
   @doc """

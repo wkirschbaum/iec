@@ -5,7 +5,14 @@ defmodule IecWeb.Narrative do
   """
 
   import IecWeb.ResultsComponents,
-    only: [format_number: 1, format_progress: 2, party_abbreviation: 2, percentage_of: 2]
+    only: [
+      format_decimal: 2,
+      format_number: 1,
+      format_percentage: 2,
+      format_progress: 2,
+      party_abbreviation: 2,
+      percentage_of: 2
+    ]
 
   @doc """
   `%{headline, lede, eyebrow, live}` for an area: its snapshot and party rows (`IecWeb.TableRows`).
@@ -232,6 +239,13 @@ defmodule IecWeb.Narrative do
     end
   end
 
+  @doc "The towns and suburbs in a ward, as a sentence: \"Takes in A, B and C.\""
+  def ward_places([]), do: nil
+  def ward_places([only]), do: "Takes in #{only}."
+
+  def ward_places(names),
+    do: "Takes in #{Enum.join(Enum.drop(names, -1), ", ")} and #{List.last(names)}."
+
   @doc """
   One or two sentences on the close contests: the narrowest council (`closest`, a council
   contest row, or nil) and how many councils and wards are within `within` points. Nil
@@ -250,13 +264,10 @@ defmodule IecWeb.Narrative do
       end
 
     "The tightest council contest is in #{closest.name}, where #{closest.leader} #{verb} " <>
-      "#{closest.runner_up} by #{precise_points(closest.margin)}#{votes}. " <>
+      "#{closest.runner_up} by #{points(closest.margin, 2)}#{votes}. " <>
       "#{String.capitalize(count(councils, "council"))} and #{count(wards, "ward")} " <>
       "are within #{within} points."
   end
-
-  defp precise_points(value),
-    do: :erlang.float_to_binary(abs(value) / 1, decimals: 2) <> " points"
 
   defp final?(snapshot),
     do:
@@ -271,6 +282,6 @@ defmodule IecWeb.Narrative do
   defp count(1, singular, _plural), do: "1 #{singular}"
   defp count(number, singular, plural), do: "#{number} #{plural || singular <> "s"}"
 
-  defp percent(value), do: :erlang.float_to_binary(value / 1, decimals: 1) <> "%"
-  defp points(value), do: :erlang.float_to_binary(abs(value) / 1, decimals: 1) <> " points"
+  defp percent(value), do: format_percentage(value, 1)
+  defp points(value, decimals \\ 1), do: format_decimal(abs(value), decimals) <> " points"
 end

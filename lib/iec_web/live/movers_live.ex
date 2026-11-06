@@ -5,10 +5,10 @@ defmodule IecWeb.MoversLive do
   import IecWeb.DesignComponents
 
   alias Iec.{Parties, Results}
-  alias IecWeb.TableRows
+  alias IecWeb.{LiveUpdates, TableRows}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results, :parties]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results, :parties]}
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
@@ -18,45 +18,23 @@ defmodule IecWeb.MoversLive do
      |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
+  @impl LiveUpdates
+  def refresh(socket), do: LiveUpdates.assign_cached(socket, {__MODULE__}, &load/1)
 
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(_assigns), do: {__MODULE__}
-
-  defp load(assigns) do
+  defp load(%{parties: parties}) do
     movers = Parties.get_movers()
     by_swing = Enum.sort_by(movers.parties, & &1.swing, :desc)
 
-    net = fn gained, lost ->
-      movers.parties
-      |> Enum.map(&Map.put(&1, :net, Map.fetch!(&1, gained) - Map.fetch!(&1, lost)))
-      |> Enum.reject(&(Map.fetch!(&1, gained) == 0 and Map.fetch!(&1, lost) == 0))
-      |> Enum.sort_by(& &1.net, :desc)
-    end
-
-    Map.new(
+    %{
       winners: Enum.filter(by_swing, &(&1.swing > 0)),
       losers: by_swing |> Enum.filter(&(&1.swing < 0)) |> Enum.reverse(),
-      ward_net: net.(:wards_gained, :wards_lost),
-      council_net: net.(:councils_gained, :councils_lost),
+      ward_net: TableRows.net_rows(movers.parties, :wards_gained, :wards_lost),
+      council_net: TableRows.net_rows(movers.parties, :councils_gained, :councils_lost),
       local_rises:
-        TableRows.with_party_name(
-          movers.local_swings.rises,
-          assigns.parties,
-          :party_id,
-          :party
-        ),
+        TableRows.with_party_name(movers.local_swings.rises, parties, :party_id, :party),
       local_falls:
-        TableRows.with_party_name(
-          movers.local_swings.falls,
-          assigns.parties,
-          :party_id,
-          :party
-        )
-    )
+        TableRows.with_party_name(movers.local_swings.falls, parties, :party_id, :party)
+    }
   end
 
   @impl Phoenix.LiveView
@@ -159,7 +137,7 @@ defmodule IecWeb.MoversLive do
       ]}>
         {@title}
       </h2>
-      <p :if={@rows == []} class="text-sm opacity-60">None so far.</p>
+      <.empty :if={@rows == []}>None so far.</.empty>
       <ol class="space-y-3">
         <li :for={{row, rank} <- Enum.with_index(@rows, 1)} id={"#{@id}-#{row.party_id}"}>
           <div class="flex items-baseline gap-3">
@@ -235,7 +213,7 @@ defmodule IecWeb.MoversLive do
         <h2 class="text-lg font-semibold">{@title}</h2>
         <p class="text-xs opacity-60">{@caption}</p>
       </div>
-      <p :if={@rows == []} class="text-sm opacity-60">None so far.</p>
+      <.empty :if={@rows == []}>None so far.</.empty>
       <div class="space-y-2">
         <div
           :for={row <- @rows}
@@ -285,47 +263,45 @@ defmodule IecWeb.MoversLive do
     ~H"""
     <div id={@id} class="panel space-y-4 p-5">
       <h2 class="text-lg font-semibold">{@title}</h2>
-      <p :if={@rows == []} class="text-sm opacity-60">None so far.</p>
-      <div :if={@rows != []} class="overflow-x-auto">
-        <table class="table table-sm">
-          <thead>
-            <tr>
-              <.sort_header table={@id} column="party" sorts={@sorts} first="asc">Party</.sort_header>
-              <.sort_header table={@id} column="municipality_name" sorts={@sorts} first="asc">
-                Municipality
-              </.sort_header>
-              <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
-                {@previous_year}
-              </.sort_header>
-              <.sort_header table={@id} column="share" sorts={@sorts} align="right">Now</.sort_header>
-              <.sort_header table={@id} column="swing" sorts={@sorts} align="right">
-                Swing
-              </.sort_header>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              :for={row <- sort_rows(@rows, @sorts[@id])}
-              id={"#{@id}-#{row.party_id}-#{row.municipality_id}"}
-            >
-              <td><.party_label parties={@parties} party_result={row} /></td>
-              <td>
-                <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
-                  {row.municipality_name}
-                </.link>
-                <span :if={not row.complete} class="badge badge-ghost badge-xs">counting</span>
-              </td>
-              <td class="text-right tabular-nums opacity-60">
-                {format_percentage(row.previous_share)}
-              </td>
-              <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-              <td class={["text-right font-semibold tabular-nums", delta_class(row.swing)]}>
-                {format_delta(row.swing, :points)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <.empty :if={@rows == []}>None so far.</.empty>
+      <.sortable_table
+        :if={@rows != []}
+        sort_key={@id}
+        rows={@rows}
+        sorts={@sorts}
+        row_id={&"#{@id}-#{&1.party_id}-#{&1.municipality_id}"}
+      >
+        <:column :let={row} label="Party" field="party" first="asc">
+          <.party_label parties={@parties} party_result={row} />
+        </:column>
+        <:column :let={row} label="Municipality" field="municipality_name" first="asc">
+          <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
+            {row.municipality_name}
+          </.link>
+          <span :if={not row.complete} class="badge badge-ghost badge-xs">counting</span>
+        </:column>
+        <:column
+          :let={row}
+          label={"#{@previous_year}"}
+          field="previous_share"
+          align="right"
+          class="opacity-60"
+        >
+          {format_percentage(row.previous_share)}
+        </:column>
+        <:column :let={row} label="Now" field="share" align="right">
+          {format_percentage(row.share)}
+        </:column>
+        <:column
+          :let={row}
+          label="Swing"
+          field="swing"
+          align="right"
+          class={&["font-semibold", delta_class(&1.swing)]}
+        >
+          {format_delta(row.swing, :points)}
+        </:column>
+      </.sortable_table>
     </div>
     """
   end

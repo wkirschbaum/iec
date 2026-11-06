@@ -5,7 +5,8 @@ defmodule IecWeb.Trends do
   vote totals, and a sentence on the long-run story.
   """
 
-  import IecWeb.ResultsComponents, only: [party_abbreviation: 2, party_colour: 2]
+  import IecWeb.ResultsComponents,
+    only: [format_percentage: 2, party_abbreviation: 2, party_colour: 2]
 
   @doc """
   `%{years, series, max, step}`: a series per party for `field` of its results
@@ -82,10 +83,37 @@ defmodule IecWeb.Trends do
     end
   end
 
-  @doc "`[%{year, registered, votes_cast}]`, oldest first."
+  @doc """
+  `points_by_party/2` for every area (`Iec.Results.list_snapshots_by_election/1`):
+  `%{area_id => %{party_id => [{year, value}]}}`.
+  """
+  def points_by_area(snapshots_by_area) do
+    Map.new(snapshots_by_area, fn {area_id, snapshots} ->
+      {area_id, points_by_party(snapshots)}
+    end)
+  end
+
+  @doc """
+  `[%{year, registered, votes_cast, registered_width, votes_cast_width}]`, oldest first:
+  the widths are percentages of the largest figure, for bars on one scale.
+  """
   def totals(snapshots_by_year) do
+    largest =
+      snapshots_by_year
+      |> Enum.map(fn {_year, snapshot} ->
+        max(snapshot.registered_voters || 0, snapshot.total_votes_cast || 0)
+      end)
+      |> Enum.max(fn -> 0 end)
+      |> max(1)
+
     for {year, snapshot} <- snapshots_by_year do
-      %{year: year, registered: snapshot.registered_voters, votes_cast: snapshot.total_votes_cast}
+      %{
+        year: year,
+        registered: snapshot.registered_voters,
+        votes_cast: snapshot.total_votes_cast,
+        registered_width: (snapshot.registered_voters || 0) / largest * 100,
+        votes_cast_width: (snapshot.total_votes_cast || 0) / largest * 100
+      }
     end
   end
 
@@ -103,12 +131,17 @@ defmodule IecWeb.Trends do
     clauses =
       Enum.map(latest, fn line ->
         {start_year, start} = hd(line.points)
-        now = percent(value_in(line, live_year))
+        now = format_percentage(value_in(line, live_year), 1)
 
         cond do
-          start_year == live_year -> "#{line.label}, new this time, #{has(final)} #{now}"
-          start_year == first_year -> "#{line.label} from #{percent(start)} to #{now}"
-          true -> "#{line.label} from #{percent(start)} in #{start_year} to #{now}"
+          start_year == live_year ->
+            "#{line.label}, new this time, #{has(final)} #{now}"
+
+          start_year == first_year ->
+            "#{line.label} from #{format_percentage(start, 1)} to #{now}"
+
+          true ->
+            "#{line.label} from #{format_percentage(start, 1)} in #{start_year} to #{now}"
         end
       end)
 
@@ -130,8 +163,6 @@ defmodule IecWeb.Trends do
 
   defp join(clauses),
     do: Enum.join(Enum.drop(clauses, -1), "; ") <> "; and " <> List.last(clauses)
-
-  defp percent(value), do: :erlang.float_to_binary(value / 1, decimals: 1) <> "%"
 
   # The chart's top and gridline step: round steps (1, 2, 2.5 or 5 times a power of ten)
   # giving at most five gridlines above the peak.

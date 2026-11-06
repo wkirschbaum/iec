@@ -2,6 +2,7 @@ defmodule Iec.FollowingTest do
   use Iec.DataCase, async: false
 
   alias Iec.{Maps, Parties, Repo, Results}
+  alias Iec.Parties.Import
   alias Iec.Results.{Feed, PartyWardResult, Ward}
 
   # A square around (longitude, latitude), `size` degrees wide.
@@ -83,14 +84,14 @@ defmodule Iec.FollowingTest do
        municipality_file([{79_800_001, [{7, 10}, {52, 20}, {1234, 5}]}])}
     ])
 
-    Parties.import_municipality_files()
+    Import.import_municipality_files()
 
     assert Repo.get!(Ward, 79_800_001).municipality_id == 3003
-    assert Enum.sort(Parties.list_followed_party_ids()) == [7, 52, 1234]
+    assert Enum.sort(Import.list_followed_party_ids()) == [7, 52, 1234]
 
     # Read once: a second pass asks nothing (the stub would now fail every request).
     stub_iec([])
-    Parties.import_municipality_files()
+    Import.import_municipality_files()
   end
 
   test "previous-election municipality files give every ward's winner, whichever party" do
@@ -99,7 +100,7 @@ defmodule Iec.FollowingTest do
        municipality_file([{79_800_001, [{7, 30}, {999, 70}]}, {79_800_002, [{7, 60}, {52, 40}]}])}
     ])
 
-    Parties.import_previous_ward_results()
+    Import.import_previous_ward_results()
 
     winners =
       Repo.all(

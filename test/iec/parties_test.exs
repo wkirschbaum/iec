@@ -179,7 +179,151 @@ defmodule Iec.PartiesTest do
     end
   end
 
+  describe "get_municipality_overview/1 and get_ward_overview/1" do
+    setup do
+      # Ward 1 changed hands; ward 2 was redrawn and changed hands; ward 3 is new.
+      Repo.insert_all(
+        Ward,
+        for ward_id <- 79_800_001..79_800_003 do
+          %{
+            id: ward_id,
+            municipality_id: 3003,
+            ward_number: Ward.ward_number(ward_id),
+            inserted_at: DateTime.utc_now()
+          }
+        end
+      )
+
+      insert_redrawn_ward(79_800_002)
+
+      ingest(
+        2021,
+        7,
+        party_file([{3003, 51.0, true}], [{79_800_001, 60.0, true}, {79_800_002, 58.0, true}])
+      )
+
+      ingest(2021, 52, party_file([{3003, 30.0, false}], [{79_800_001, 30.0, false}]))
+
+      ingest(
+        2026,
+        52,
+        party_file([{3003, 45.0, false}], [
+          {79_800_001, 58.0, true},
+          {79_800_002, 57.0, true},
+          {79_800_003, 70.0, true}
+        ])
+      )
+
+      :ok
+    end
+
+    test "tells a ward that changed hands from a redrawn and a new one" do
+      by_id = Map.new(Parties.get_municipality_overview(3003).wards, &{&1.ward_id, &1})
+
+      assert %{holder: 52, previous_holder: 7, changed_hands: true, new_ward: false} =
+               by_id[79_800_001]
+
+      assert %{holder: 52, previous_holder: 7, changed_hands: false, redrawn: true} =
+               by_id[79_800_002]
+
+      refute by_id[79_800_002].new_ward
+
+      assert %{holder: 52, previous_holder: nil, changed_hands: false, new_ward: true} =
+               by_id[79_800_003]
+    end
+
+    test "compares the council share and seats of each party standing now" do
+      assert %{parties: [party]} = Parties.get_municipality_overview(3003)
+
+      assert %{
+               party_id: 52,
+               share: 45.0,
+               previous_share: 30.0,
+               swing: 15.0,
+               seats: 10,
+               previous_seats: 10,
+               majority: false,
+               previous_majority: false
+             } = party
+    end
+
+    test "a ward's parties, its winner first, with the council share" do
+      ward = Parties.get_ward_overview(79_800_001)
+
+      assert %{municipality_id: 3003, holder: 52, changed_hands: true} = ward
+
+      assert [%{party_id: 52, won: true, previous_won: false, council_share: 45.0}] =
+               ward.parties
+
+      assert Parties.get_ward_overview(79_800_009) == nil
+    end
+  end
+
+  defp insert_redrawn_ward(ward_id) do
+    Repo.insert_all(Iec.Maps.Boundary, [
+      %{
+        election: 2026,
+        level: :ward,
+        area_id: ward_id,
+        municipality_id: 3003,
+        province_id: 3,
+        name: "JHB · ward #{Ward.ward_number(ward_id)}",
+        path: "M0 0l1 0 0 1z",
+        min_x: 0,
+        min_y: 0,
+        max_x: 1,
+        max_y: 1,
+        redrawn: true,
+        inserted_at: DateTime.utc_now()
+      }
+    ])
+  end
+
   describe "get_movers/0" do
+    test "counts wards and complete councils gained and lost, a hung council lost by one" do
+      municipality_snapshot(3003, "JHB - City of Johannesburg", true)
+      municipality_snapshot(3004, "TSH - City of Tshwane", false)
+
+      # Party 7 held both councils and wards 1 and 2; ward 2 has since been redrawn.
+      ingest(
+        2021,
+        7,
+        party_file([{3003, 55.0, true}, {3004, 55.0, true}], [
+          {79_800_001, 60.0, true},
+          {79_800_002, 60.0, true}
+        ])
+      )
+
+      # Now Johannesburg is hung and Tshwane still counting; party 52 took both wards.
+      ingest(2026, 7, party_file([{3003, 40.0, false}, {3004, 40.0, false}], []))
+      insert_redrawn_ward(79_800_002)
+
+      ingest(
+        2026,
+        52,
+        party_file([{3003, 45.0, false}], [{79_800_001, 55.0, true}, {79_800_002, 55.0, true}])
+      )
+
+      national = %{election: 2026, name: "national", kind: :national, url: "x"}
+
+      data = %{
+        "PartyBallotResults" => [
+          %{"ID" => 7, "TotalValidVotes" => 400, "PercOfVotes" => 40.0, "IOrder" => 1},
+          %{"ID" => 52, "TotalValidVotes" => 450, "PercOfVotes" => 45.0, "IOrder" => 2}
+        ]
+      }
+
+      {:ok, _snapshots} = Results.ingest(national, data, "{}", %{})
+
+      by_party = Map.new(Parties.get_movers().parties, &{&1.party_id, &1})
+
+      assert %{wards_gained: 0, wards_lost: 1, councils_gained: 0, councils_lost: 1} =
+               by_party[7]
+
+      assert %{wards_gained: 1, wards_lost: 0, councils_gained: 0, councils_lost: 0} =
+               by_party[52]
+    end
+
     test "leaves out a council share with no previous figure" do
       municipality_snapshot(3003, "JHB - City of Johannesburg", true)
       municipality_snapshot(3004, "TSH - City of Tshwane", true)

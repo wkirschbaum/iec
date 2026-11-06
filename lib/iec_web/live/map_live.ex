@@ -36,19 +36,13 @@ defmodule IecWeb.MapLive do
     mode = if params["mode"] in modes, do: params["mode"], else: "leader"
     mode_atom = Enum.find(mode_atoms, &(Atom.to_string(&1) == mode))
 
-    province_id =
-      case Integer.parse(params["province"] || "") do
-        {id, ""} -> id
-        _not_a_province -> nil
-      end
-
     {:noreply,
      assign(socket,
        level: level,
        mode: mode,
        mode_atom: mode_atom,
        modes: Enum.map(modes, &{mode_label(&1), &1}),
-       province_id: province_id
+       province_id: IecWeb.Params.id(params["province"])
      )}
   end
 

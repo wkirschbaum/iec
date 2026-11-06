@@ -77,6 +77,20 @@ and "Live · 76% counted" becomes "Final results" when the count completes.
 - Theme, fonts, `.panel`, `.eyebrow`, table styles: `assets/css/app.css`,
   `root.html.heex`.
 - Masthead, footer, tab bar: `IecWeb.Layouts`.
-- Page header, section heading, key figure, swing chip, vote-share bar, segmented
-  control: `IecWeb.DesignComponents`.
+- Page header (with its breadcrumb), section heading, key figure and the count's figures,
+  swing chip, vote-share bar and sparkline, segmented control, linked row and linked card
+  (one link each, never nested), highlights, not-found and empty states:
+  `IecWeb.DesignComponents`.
+- Party labels, ward labels and ward buttons, shared tables, "Show more", formatters
+  (numbers, shares, points, swings, progress): `IecWeb.ResultsComponents`.
+- Sortable tables, each column declared once with its heading and cell, and paging:
+  `IecWeb.Sorting`.
+- Maps: `IecWeb.MapComponent`; trend charts: `IecWeb.ChartComponents`.
+- What tables and cards show, built outside the templates: `IecWeb.TableRows`,
+  `IecWeb.Trends`, `IecWeb.PartySummary`, `IecWeb.WardSearch`; ward names:
+  `IecWeb.WardNames`.
 - Generated sentences: `IecWeb.Narrative`; the changes digest: `IecWeb.ChangeDigest`.
+- Page data is computed once per data change and shared (`IecWeb.LiveUpdates`
+  `assign_cached/3`, `Iec.Cache`); data that only changes with an import (outlines,
+  names) is kept longer.
+

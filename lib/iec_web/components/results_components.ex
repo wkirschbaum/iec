@@ -1,5 +1,5 @@
 defmodule IecWeb.ResultsComponents do
-  @moduledoc "Tables, progress bars and change entries shared by the results pages."
+  @moduledoc "Formatters, and the tables, labels and change entries shared by the results pages."
   use IecWeb, :html
 
   alias Iec.Results.Change
@@ -9,13 +9,18 @@ defmodule IecWeb.ResultsComponents do
 
   ## Formatting
 
+  @doc "A number to a fixed count of decimals: 31.9."
+  def format_decimal(value, decimals \\ 1),
+    do: :erlang.float_to_binary(value / 1, decimals: decimals)
+
   @doc "A big number in short form: 20.7M, 412k, 980."
   def format_compact(nil), do: "–"
-  def format_compact(number) when number >= 1_000_000, do: "#{decimal(number / 1_000_000)}M"
+
+  def format_compact(number) when number >= 1_000_000,
+    do: "#{format_decimal(number / 1_000_000)}M"
+
   def format_compact(number) when number >= 10_000, do: "#{round(number / 1_000)}k"
   def format_compact(number), do: format_number(number)
-
-  defp decimal(value), do: :erlang.float_to_binary(value, decimals: 1)
 
   def format_number(nil), do: "–"
 
@@ -35,26 +40,29 @@ defmodule IecWeb.ResultsComponents do
     sign <> digits
   end
 
-  def format_percentage(nil), do: "–"
-  def format_percentage(value), do: :erlang.float_to_binary(value / 1, decimals: 2) <> "%"
+  @doc "A percentage, to two decimals in tables (31.94%) or fewer in sentences (31.9%)."
+  def format_percentage(value, decimals \\ 2)
+  def format_percentage(nil, _decimals), do: "–"
+  def format_percentage(value, decimals), do: format_decimal(value, decimals) <> "%"
+
+  @doc "A part of a whole as a percentage, rounded down like a count: 1.4%."
+  def format_share_of(part, whole) when is_integer(part) and is_integer(whole) and whole > 0,
+    do: format_progress(part / whole * 100)
+
+  def format_share_of(_part, _whole), do: "–"
 
   @doc "A lead in percentage points: 2.00 pts."
   def format_points(nil), do: "–"
-  def format_points(points), do: :erlang.float_to_binary(points / 1, decimals: 2) <> " pts"
+  def format_points(points), do: format_decimal(points, 2) <> " pts"
 
   @doc "A signed delta: votes and seats as integers, percentages as points."
   def format_delta(nil, _kind), do: "–"
   def format_delta(delta, _kind) when delta == 0, do: "0"
+  def format_delta(delta, :points), do: sign(delta) <> format_decimal(abs(delta), 2)
+  def format_delta(delta, :count), do: sign(delta) <> format_number(abs(delta))
 
-  def format_delta(delta, :points) do
-    sign = if delta > 0, do: "+", else: "−"
-    sign <> :erlang.float_to_binary(abs(delta) / 1, decimals: 2)
-  end
-
-  def format_delta(delta, :count) do
-    sign = if delta > 0, do: "+", else: "−"
-    sign <> format_number(abs(delta))
-  end
+  defp sign(delta) when delta > 0, do: "+"
+  defp sign(_delta), do: "−"
 
   def delta_class(delta) when is_number(delta) and delta > 0, do: "text-success"
   def delta_class(delta) when is_number(delta) and delta < 0, do: "text-error"
@@ -79,13 +87,24 @@ defmodule IecWeb.ResultsComponents do
   def percentage_of(_complete, expected) when expected in [nil, 0], do: 0.0
   def percentage_of(complete, expected), do: (complete || 0) / expected * 100
 
+  @doc "Whether a count is still running: fewer voting districts in than expected."
+  def counting?(%{voting_districts_complete: complete, voting_districts_expected: expected})
+      when is_integer(complete) and is_integer(expected),
+      do: complete < expected
+
+  def counting?(_snapshot_or_nil), do: false
+
+  @doc "Whether a council's count is finished, from its municipality snapshot (or nil)."
+  def council_decided?(%{municipalities_complete: 1}), do: true
+  def council_decided?(_snapshot_or_nil), do: false
+
   @doc "How far along a count is, e.g. \"71.3%\", from counts or a percentage."
   def format_progress(complete, expected),
     do: format_progress(percentage_of(complete, expected))
 
   # Rounded down, so a count still running never reads 100.0%.
   def format_progress(percentage),
-    do: :erlang.float_to_binary(Float.floor(percentage / 1, 1), decimals: 1) <> "%"
+    do: format_decimal(Float.floor(percentage / 1, 1)) <> "%"
 
   def party_abbreviation(parties, party_result) do
     case party_result.party_id do
@@ -208,64 +227,59 @@ defmodule IecWeb.ResultsComponents do
   @doc "Parties' votes, share and seats, against the previous election. Sortable."
   def party_table(assigns) do
     ~H"""
-    <div class="overflow-x-auto">
-      <table id={@id} class="table table-sm">
-        <thead>
-          <tr>
-            <.sort_header table={@id} column="party" sorts={@sorts} first="asc">Party</.sort_header>
-            <.sort_header table={@id} column="votes" sorts={@sorts} align="right">Votes</.sort_header>
-            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Share</.sort_header>
-            <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
-              {@previous_year}
-            </.sort_header>
-            <.sort_header table={@id} column="swing" sorts={@sorts} align="right">Swing</.sort_header>
-            <.sort_header table={@id} column="seats" sorts={@sorts} align="right">Seats</.sort_header>
-            <.sort_header table={@id} column="previous_seats" sorts={@sorts} align="right">
-              {@previous_year}
-            </.sort_header>
-            <.sort_header
-              :if={@show_councils}
-              table={@id}
-              column="councils"
-              sorts={@sorts}
-              align="right"
-            >
-              Councils won
-            </.sort_header>
-            <.sort_header
-              :if={@show_councils}
-              table={@id}
-              column="previous_councils"
-              sorts={@sorts}
-              align="right"
-            >
-              {@previous_year}
-            </.sort_header>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-party-#{row.party_id}"}>
-            <td><.party_label parties={@parties} party_result={row} /></td>
-            <td class="text-right tabular-nums">{format_number(row.votes)}</td>
-            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-            <td class="text-right tabular-nums opacity-60">
-              {format_percentage(row.previous_share)}
-            </td>
-            <td class={["text-right tabular-nums", delta_class(row.swing)]}>
-              {format_delta(row.swing, :points)}
-            </td>
-            <td class="text-right tabular-nums">{format_number(row.seats)}</td>
-            <td class="text-right tabular-nums opacity-60">{format_number(row.previous_seats)}</td>
-            <td :if={@show_councils} class="text-right tabular-nums">
-              {format_number(row.councils)}
-            </td>
-            <td :if={@show_councils} class="text-right tabular-nums opacity-60">
-              {format_number(row.previous_councils)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <.sortable_table
+      id={@id}
+      rows={@rows}
+      sorts={@sorts}
+      row_id={&"#{@id}-party-#{&1.party_id}"}
+    >
+      <:column :let={row} label="Party" field="party" first="asc">
+        <.party_label parties={@parties} party_result={row} />
+      </:column>
+      <:column :let={row} label="Votes" field="votes" align="right">
+        {format_number(row.votes)}
+      </:column>
+      <:column :let={row} label="Share" field="share" align="right">
+        {format_percentage(row.share)}
+      </:column>
+      <:column
+        :let={row}
+        label={"#{@previous_year}"}
+        field="previous_share"
+        align="right"
+        class="opacity-60"
+      >
+        {format_percentage(row.previous_share)}
+      </:column>
+      <:column :let={row} label="Swing" field="swing" align="right" class={&delta_class(&1.swing)}>
+        {format_delta(row.swing, :points)}
+      </:column>
+      <:column :let={row} label="Seats" field="seats" align="right">
+        {format_number(row.seats)}
+      </:column>
+      <:column
+        :let={row}
+        label={"#{@previous_year}"}
+        field="previous_seats"
+        align="right"
+        class="opacity-60"
+      >
+        {format_number(row.previous_seats)}
+      </:column>
+      <:column :let={row} :if={@show_councils} label="Councils won" field="councils" align="right">
+        {format_number(row.councils)}
+      </:column>
+      <:column
+        :let={row}
+        :if={@show_councils}
+        label={"#{@previous_year}"}
+        field="previous_councils"
+        align="right"
+        class="opacity-60"
+      >
+        {format_number(row.previous_councils)}
+      </:column>
+    </.sortable_table>
     """
   end
 
@@ -281,51 +295,42 @@ defmodule IecWeb.ResultsComponents do
   @doc "Areas with how far their count is, who leads now and who led before. Sortable."
   def area_table(assigns) do
     ~H"""
-    <div class="overflow-x-auto">
-      <table id={@id} class="table table-sm">
-        <thead>
-          <tr>
-            <.sort_header table={@id} column="name" sorts={@sorts} first="asc">
-              {@area_label}
-            </.sort_header>
-            <.sort_header table={@id} column="counted" sorts={@sorts} align="right">
-              Districts counted
-            </.sort_header>
-            <.sort_header :if={@show_council} table={@id} column="council" sorts={@sorts} first="asc">
-              Council
-            </.sort_header>
-            <.sort_header table={@id} column="leader" sorts={@sorts} first="asc">
-              Leading
-            </.sort_header>
-            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Share</.sort_header>
-            <.sort_header table={@id} column="previous_leader" sorts={@sorts} first="asc">
-              {@previous_year} leader
-            </.sort_header>
-            <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
-              {@previous_year} share
-            </.sort_header>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-#{row.area_id}"}>
-            <td><.link navigate={@area_path.(row.area_id)} class="link">{row.name}</.link></td>
-            <td class="text-right tabular-nums">{format_progress(row.counted)}</td>
-            <td :if={@show_council}>
-              <.council_control :if={row.complete} parties={@parties} control={row.control} />
-              <span :if={not row.complete} class="badge badge-ghost badge-sm">counting</span>
-            </td>
-            <td><.party_or_dash parties={@parties} party_id={row.leader_id} /></td>
-            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-            <td class="opacity-60">
-              <.party_or_dash parties={@parties} party_id={row.previous_leader_id} />
-            </td>
-            <td class="text-right tabular-nums opacity-60">
-              {format_percentage(row.previous_share)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <.sortable_table id={@id} rows={@rows} sorts={@sorts} row_id={&"#{@id}-#{&1.area_id}"}>
+      <:column :let={row} label={@area_label} field="name" first="asc">
+        <.link navigate={@area_path.(row.area_id)} class="link">{row.name}</.link>
+      </:column>
+      <:column :let={row} label="Districts counted" field="counted" align="right">
+        {format_progress(row.counted)}
+      </:column>
+      <:column :let={row} :if={@show_council} label="Council" field="council" first="asc">
+        <.council_control :if={row.complete} parties={@parties} control={row.control} />
+        <span :if={not row.complete} class="badge badge-ghost badge-sm">counting</span>
+      </:column>
+      <:column :let={row} label="Leading" field="leader" first="asc">
+        <.party_or_dash parties={@parties} party_id={row.leader_id} />
+      </:column>
+      <:column :let={row} label="Share" field="share" align="right">
+        {format_percentage(row.share)}
+      </:column>
+      <:column
+        :let={row}
+        label={"#{@previous_year} leader"}
+        field="previous_leader"
+        first="asc"
+        class="opacity-60"
+      >
+        <.party_or_dash parties={@parties} party_id={row.previous_leader_id} />
+      </:column>
+      <:column
+        :let={row}
+        label={"#{@previous_year} share"}
+        field="previous_share"
+        align="right"
+        class="opacity-60"
+      >
+        {format_percentage(row.previous_share)}
+      </:column>
+    </.sortable_table>
     """
   end
 
@@ -338,49 +343,35 @@ defmodule IecWeb.ResultsComponents do
   @doc "Wards with who leads them, by how much, and who led before; each opens its page."
   def ward_results_table(assigns) do
     ~H"""
-    <div class="overflow-x-auto">
-      <table id={@id} class="table table-sm">
-        <thead>
-          <tr>
-            <.sort_header table={@id} column="ward" sorts={@sorts} first="asc">Ward</.sort_header>
-            <.sort_header table={@id} column="leader" sorts={@sorts} first="asc">
-              Leading
-            </.sort_header>
-            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Share</.sort_header>
-            <.sort_header table={@id} column="margin" sorts={@sorts} align="right" first="asc">
-              Lead
-            </.sort_header>
-            <.sort_header table={@id} column="previous_leader" sorts={@sorts} first="asc">
-              {@previous_year}
-            </.sort_header>
-            <.sort_header table={@id} column="status" sorts={@sorts} first="asc">
-              Status
-            </.sort_header>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-#{row.ward_id}"}>
-            <td class="whitespace-nowrap">
-              <.link navigate={~p"/wards/#{row.ward_id}"} class="link font-medium">
-                <.ward_label number={row.ward_number} name={row[:ward_name]} />
-              </.link>
-              <span class="block text-xs opacity-60">{row.municipality_name}</span>
-            </td>
-            <td>
-              <.party_or_dash parties={@parties} party_id={row.leader_id} empty="no results" />
-            </td>
-            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-            <td class="text-right tabular-nums">
-              {format_points(row.margin)}
-            </td>
-            <td class="opacity-75">
-              <.party_or_dash parties={@parties} party_id={row.previous_leader_id} />
-            </td>
-            <td class="opacity-75">{row.status}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <.sortable_table id={@id} rows={@rows} sorts={@sorts} row_id={&"#{@id}-#{&1.ward_id}"}>
+      <:column :let={row} label="Ward" field="ward" first="asc" class="whitespace-nowrap">
+        <.link navigate={~p"/wards/#{row.ward_id}"} class="link font-medium">
+          <.ward_label number={row.ward_number} name={row[:ward_name]} />
+        </.link>
+        <span class="block text-xs opacity-60">{row.municipality_name}</span>
+      </:column>
+      <:column :let={row} label="Leading" field="leader" first="asc">
+        <.party_or_dash parties={@parties} party_id={row.leader_id} empty="no results" />
+      </:column>
+      <:column :let={row} label="Share" field="share" align="right">
+        {format_percentage(row.share)}
+      </:column>
+      <:column :let={row} label="Lead" field="margin" align="right" first="asc">
+        {format_points(row.margin)}
+      </:column>
+      <:column
+        :let={row}
+        label={"#{@previous_year}"}
+        field="previous_leader"
+        first="asc"
+        class="opacity-75"
+      >
+        <.party_or_dash parties={@parties} party_id={row.previous_leader_id} />
+      </:column>
+      <:column :let={row} label="Status" field="status" first="asc" class="opacity-75">
+        {row.status}
+      </:column>
+    </.sortable_table>
     """
   end
 
@@ -399,12 +390,11 @@ defmodule IecWeb.ResultsComponents do
 
   attr :ward_id, :integer, required: true
   attr :ward_number, :integer, required: true
-  attr :result, :map, default: nil
+  attr :result, :map, default: nil, doc: "from Iec.Maps.list_area_results/2"
 
   attr :name, :string,
     default: nil,
-    doc: "the places in the ward, for its tooltip",
-    doc: "from Iec.Maps.list_area_results/2"
+    doc: "the places in the ward, for its tooltip"
 
   attr :parties, :map, required: true
   attr :dimmed, :boolean, default: false, doc: "not what is being looked for"
@@ -415,6 +405,8 @@ defmodule IecWeb.ResultsComponents do
   counting, grey before results.
   """
   def ward_chip(assigns) do
+    assigns = assign(assigns, :title, ward_chip_title(assigns))
+
     ~H"""
     <.link
       navigate={~p"/wards/#{@ward_id}"}
@@ -426,8 +418,8 @@ defmodule IecWeb.ResultsComponents do
           "border-base-300 bg-base-100 hover:-translate-y-px hover:border-base-content/30 hover:shadow-sm",
         @dimmed && "opacity-30 hover:opacity-100"
       ]}
-      title={ward_chip_title(@ward_number, @name, @result, @parties)}
-      aria-label={ward_chip_title(@ward_number, @name, @result, @parties)}
+      title={@title}
+      aria-label={@title}
     >
       <span
         class={[
@@ -435,17 +427,14 @@ defmodule IecWeb.ResultsComponents do
           is_nil(@result) && "bg-base-300",
           @result && @result.status == :counting && "border-2 bg-transparent"
         ]}
-        style={
-          @result &&
-            "#{if @result.status == :counting, do: "border-color", else: "background-color"}: #{party_colour(@parties, %{party_id: @result.leader})}"
-        }
+        style={ward_chip_dot(@result, @parties)}
       />
       {@ward_number}
     </.link>
     """
   end
 
-  defp ward_chip_title(number, name, result, parties) do
+  defp ward_chip_title(%{ward_number: number, name: name, result: result, parties: parties}) do
     ward = if name, do: "Ward #{number} (#{name})", else: "Ward #{number}"
     ward_chip_result(ward, result, parties)
   end
@@ -457,6 +446,14 @@ defmodule IecWeb.ResultsComponents do
 
     "#{ward}: #{verb} #{party_abbreviation(parties, %{party_id: result.leader})} " <>
       "(#{format_percentage(result.share)})"
+  end
+
+  # The leader's colour: filled once declared, a ring while counting.
+  defp ward_chip_dot(nil, _parties), do: nil
+
+  defp ward_chip_dot(result, parties) do
+    property = if result.status == :counting, do: "border-color", else: "background-color"
+    "#{property}: #{party_colour(parties, %{party_id: result.leader})}"
   end
 
   attr :segments, :list, required: true, doc: "`[{text, matched?}]`"
@@ -521,14 +518,7 @@ defmodule IecWeb.ResultsComponents do
         @event.kind == :lead && "bg-warning/15 text-warning",
         @event.kind == :decided && "bg-success/15 text-success"
       ]}>
-        <.icon
-          name={
-            if @event.kind == :lead,
-              do: "hero-arrows-right-left-micro",
-              else: "hero-check-badge-micro"
-          }
-          class="size-4"
-        />
+        <.icon name={highlight_icon(@event.kind)} class="size-4" />
       </span>
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -556,6 +546,9 @@ defmodule IecWeb.ResultsComponents do
     </li>
     """
   end
+
+  defp highlight_icon(:lead), do: "hero-arrows-right-left-micro"
+  defp highlight_icon(:decided), do: "hero-check-badge-micro"
 
   attr :change, Change, required: true
   attr :parties, :map, required: true

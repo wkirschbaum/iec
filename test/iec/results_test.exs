@@ -87,6 +87,29 @@ defmodule Iec.ResultsTest do
     end
   end
 
+  describe "list_area_summaries/1" do
+    test "names each area from its latest live snapshot, and says if a council is done" do
+      ingest(%{@feed | election: 2021}, province_file("2022-01-15T17:00:00+02:00", 900, 10))
+      ingest(province_file("2026-11-06T07:00:00+02:00", 500, 6))
+
+      renamed =
+        province_file("2026-11-06T07:05:00+02:00", 500, 6)
+        |> put_in(["MunicipalityResults", Access.at(0), "Municipality"], "JHB - Joburg")
+        |> put_in(["MunicipalityResults", Access.at(0), "MuncipalitiesComplete"], 1)
+
+      ingest(renamed)
+
+      assert Results.list_area_summaries(:municipality) == %{
+               3003 => %{id: 3003, name: "JHB - Joburg", province_id: 3, complete: true}
+             }
+
+      assert %{3 => %{name: "Gauteng", complete: false}} = Results.list_area_summaries(:province)
+      assert Results.list_area_names(:municipality) == %{3003 => "JHB - Joburg"}
+      assert Results.get_area_name(:municipality, 3003) == "JHB - Joburg"
+      assert Results.get_area_name(:municipality, 3004) == nil
+    end
+  end
+
   describe "Parser.parse/2" do
     test "takes the totals from a party with registered voters, skipping those without" do
       data = %{

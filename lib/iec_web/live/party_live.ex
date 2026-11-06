@@ -5,10 +5,10 @@ defmodule IecWeb.PartyLive do
   import IecWeb.DesignComponents
 
   alias Iec.{Parties, Results}
-  alias IecWeb.{Narrative, PartySummary}
+  alias IecWeb.{LiveUpdates, Narrative, PartySummary}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results, :parties]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results, :parties]}
 
   # Long lists open collapsed, and show this many rows until "Show all".
   @collapsed_by_default ["municipalities-kept", "wards-won-new", "wards-pending", "wards-held"]
@@ -16,14 +16,12 @@ defmodule IecWeb.PartyLive do
 
   @impl Phoenix.LiveView
   def mount(%{"id" => id}, _session, socket) do
-    party_id = IecWeb.Params.id(id)
-
     previous_year = Results.previous_year()
 
     {:ok,
      socket
      |> assign(
-       party_id: party_id,
+       party_id: IecWeb.Params.id(id),
        previous_year: previous_year,
        sections: PartySummary.sections(Results.live_year(), previous_year),
        closed_sections: MapSet.new(@collapsed_by_default),
@@ -32,20 +30,17 @@ defmodule IecWeb.PartyLive do
      |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
+  @impl LiveUpdates
   def refresh(%{assigns: %{party_id: nil}} = socket),
     do: assign(socket, page_title: "Party", found: false)
 
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
-
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(assigns), do: {__MODULE__, assigns.party_id}
+  def refresh(socket),
+    do: LiveUpdates.assign_cached(socket, {__MODULE__, socket.assigns.party_id}, &load/1)
 
   defp load(assigns) do
-    %{party_id: party_id, parties: parties} = assigns
+    %{party_id: party_id, parties: parties, previous_year: previous_year} = assigns
     overview = Parties.get_party_overview(party_id)
+    name = party_abbreviation(parties, %{party_id: party_id})
 
     summary =
       PartySummary.build(
@@ -55,23 +50,18 @@ defmodule IecWeb.PartyLive do
         assigns.sections
       )
 
-    Map.new(
+    %{
       # A party is known from the IEC's party lists, or from results before those load.
       found:
         Map.has_key?(parties, party_id) or overview.wards != [] or overview.municipalities != [],
-      page_title: party_abbreviation(parties, %{party_id: party_id}),
+      page_title: name,
       stats: summary.stats,
-      lede:
-        Narrative.party(
-          summary.stats,
-          party_abbreviation(parties, %{party_id: party_id}),
-          assigns.previous_year
-        ),
+      lede: Narrative.party(summary.stats, name, previous_year),
       breakdowns: summary.breakdowns,
       province_rows: summary.provinces,
       section_rows: summary.section_rows,
       has_wards: overview.wards != []
-    )
+    }
   end
 
   @impl Phoenix.LiveView
@@ -86,13 +76,6 @@ defmodule IecWeb.PartyLive do
   # Anything else (a stale or crafted event) changes nothing.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
-  # Whether the national count is still running, from the footer's figures.
-  defp counting?(%{voting_districts_complete: complete, voting_districts_expected: expected})
-       when is_integer(complete) and is_integer(expected),
-       do: complete < expected
-
-  defp counting?(_progress), do: false
-
   defp toggle(set, member) do
     if MapSet.member?(set, member), do: MapSet.delete(set, member), else: MapSet.put(set, member)
   end
@@ -101,12 +84,9 @@ defmodule IecWeb.PartyLive do
   def render(%{found: false} = assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <.page_header eyebrow="Party" title="Not found">
-        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
-        <:lede>
-          No party on the IEC's lists has this id. Every party name on the site links to its page.
-        </:lede>
-      </.page_header>
+      <.not_found eyebrow="Party">
+        No party on the IEC's lists has this id. Every party name on the site links to its page.
+      </.not_found>
     </Layouts.app>
     """
   end
@@ -123,9 +103,9 @@ defmodule IecWeb.PartyLive do
       <.page_header
         accent={party_colour(@parties, %{party_id: @party_id})}
         eyebrow={(@parties[@party_id] && @parties[@party_id].name) || "Party"}
-        title={party_abbreviation(@parties, %{party_id: @party_id})}
+        title={@page_title}
+        crumbs={[{"Overview", ~p"/"}]}
       >
-        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
         <:lede :if={@lede}>{@lede}</:lede>
       </.page_header>
 
@@ -178,10 +158,7 @@ defmodule IecWeb.PartyLive do
         </.section_heading>
         <.council_section
           :for={view <- @council_sections}
-          section={view.section}
-          rows={view.rows}
-          total={view.total}
-          open={view.open}
+          view={view}
           parties={@parties}
           party_id={@party_id}
           previous_year={@previous_year}
@@ -193,15 +170,12 @@ defmodule IecWeb.PartyLive do
         <.section_heading title="Wards">
           <:subtitle>Ward seats against {@previous_year}</:subtitle>
         </.section_heading>
-        <p :if={not @has_wards} class="opacity-60">
+        <.empty :if={not @has_wards}>
           No ward results yet; they fill in as the party files report.
-        </p>
+        </.empty>
         <.ward_section
           :for={view <- @ward_sections}
-          section={view.section}
-          rows={view.rows}
-          total={view.total}
-          open={view.open}
+          view={view}
           parties={@parties}
           previous_year={@previous_year}
           sorts={@sorts}
@@ -213,13 +187,14 @@ defmodule IecWeb.PartyLive do
 
   # A section's rows in the chosen order: the first 25, or all after "Show all".
   defp section_view(assigns, section) do
-    rows = sort_rows(assigns.section_rows[section.id] || [], assigns.sorts[section.id])
-    expanded = MapSet.member?(assigns.expanded_sections, section.id)
+    rows = assigns.section_rows[section.id] || []
+
+    limit =
+      if MapSet.member?(assigns.expanded_sections, section.id), do: length(rows), else: @row_limit
 
     %{
       section: section,
-      rows: if(expanded, do: rows, else: Enum.take(rows, @row_limit)),
-      total: length(rows),
+      page: sorted_page(rows, assigns.sorts[section.id], limit),
       open: not MapSet.member?(assigns.closed_sections, section.id)
     }
   end
@@ -318,224 +293,186 @@ defmodule IecWeb.PartyLive do
 
   defp province_table(assigns) do
     ~H"""
-    <div class="overflow-x-auto">
-      <table id="province-summary" class="table table-sm">
-        <thead>
-          <tr>
-            <.sort_header table="province-summary" column="name" sorts={@sorts} first="asc">
-              Province
-            </.sort_header>
-            <.sort_header table="province-summary" column="wards_gained" sorts={@sorts} align="right">
-              Wards gained
-            </.sort_header>
-            <.sort_header table="province-summary" column="wards_lost" sorts={@sorts} align="right">
-              Wards lost
-            </.sort_header>
-            <.sort_header table="province-summary" column="net" sorts={@sorts} align="right">
-              Net
-            </.sort_header>
-            <.sort_header
-              table="province-summary"
-              column="councils_gained"
-              sorts={@sorts}
-              align="right"
-            >
-              Councils gained
-            </.sort_header>
-            <.sort_header table="province-summary" column="councils_lost" sorts={@sorts} align="right">
-              Councils lost
-            </.sort_header>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            :for={province <- sort_rows(@rows, @sorts["province-summary"])}
-            id={"province-summary-#{province.province_id}"}
-          >
-            <td>
-              <.link
-                :if={province.province_id}
-                navigate={~p"/provinces/#{province.province_id}"}
-                class="link"
-              >
-                {province.name}
-              </.link>
-              <span :if={is_nil(province.province_id)}>{province.name}</span>
-            </td>
-            <td class="text-right tabular-nums">{province.wards_gained}</td>
-            <td class="text-right tabular-nums">{province.wards_lost}</td>
-            <td class={["text-right tabular-nums font-medium", delta_class(province.net)]}>
-              {format_delta(province.net, :count)}
-            </td>
-            <td class="text-right tabular-nums">{province.councils_gained}</td>
-            <td class="text-right tabular-nums">{province.councils_lost}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <.sortable_table
+      id="province-summary"
+      rows={@rows}
+      sorts={@sorts}
+      row_id={&"province-summary-#{&1.province_id}"}
+    >
+      <:column :let={province} label="Province" field="name" first="asc">
+        <.link
+          :if={province.province_id}
+          navigate={~p"/provinces/#{province.province_id}"}
+          class="link"
+        >
+          {province.name}
+        </.link>
+        <span :if={is_nil(province.province_id)}>{province.name}</span>
+      </:column>
+      <:column :let={province} label="Wards gained" field="wards_gained" align="right">
+        {province.wards_gained}
+      </:column>
+      <:column :let={province} label="Wards lost" field="wards_lost" align="right">
+        {province.wards_lost}
+      </:column>
+      <:column
+        :let={province}
+        label="Net"
+        field="net"
+        align="right"
+        class={&["font-medium", delta_class(&1.net)]}
+      >
+        {format_delta(province.net, :count)}
+      </:column>
+      <:column :let={province} label="Councils gained" field="councils_gained" align="right">
+        {province.councils_gained}
+      </:column>
+      <:column :let={province} label="Councils lost" field="councils_lost" align="right">
+        {province.councils_lost}
+      </:column>
+    </.sortable_table>
     """
   end
 
-  attr :section, :map, required: true
-  attr :rows, :list, required: true
-  attr :total, :integer, required: true
-  attr :open, :boolean, required: true
+  attr :view, :map, required: true, doc: "`%{section, page, open}`"
   attr :parties, :map, required: true
   attr :party_id, :integer, required: true
   attr :previous_year, :integer, required: true
   attr :sorts, :map, required: true
 
   defp council_section(assigns) do
+    assigns = assign(assigns, section: assigns.view.section, page: assigns.view.page)
+
     ~H"""
     <section id={@section.id} class="panel px-4 py-3">
-      <.section_toggle id={@section.id} title={@section.title} count={@total} open={@open} />
-      <div :if={@open and @total > 0} class="overflow-x-auto mt-2">
-        <table class="table table-sm">
-          <thead>
-            <tr>
-              <.sort_header table={@section.id} column="name" sorts={@sorts} first="asc">
-                Municipality
-              </.sort_header>
-              <.sort_header table={@section.id} column="share" sorts={@sorts} align="right">
-                Share
-              </.sort_header>
-              <.sort_header table={@section.id} column="previous_share" sorts={@sorts} align="right">
-                {@previous_year}
-              </.sort_header>
-              <.sort_header table={@section.id} column="swing" sorts={@sorts} align="right">
-                Swing
-              </.sort_header>
-              <.sort_header table={@section.id} column="seats" sorts={@sorts} align="right">
-                Seats
-              </.sort_header>
-              <.sort_header table={@section.id} column="previous_seats" sorts={@sorts} align="right">
-                {@previous_year}
-              </.sort_header>
-              <.sort_header
-                :if={@section.other}
-                table={@section.id}
-                column="other_label"
-                sorts={@sorts}
-                first="asc"
-              >
-                {@section.other}
-              </.sort_header>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={row <- @rows} id={"#{@section.id}-#{row.municipality_id}"}>
-              <td>
-                <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
-                  {row.name}
-                </.link>
-              </td>
-              <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-              <td class="text-right tabular-nums opacity-60">
-                {format_percentage(row.previous_share)}
-              </td>
-              <td class={["text-right tabular-nums", delta_class(row.swing)]}>
-                {format_delta(row.swing, :points)}
-              </td>
-              <td class="text-right tabular-nums">{format_number(row.seats)}</td>
-              <td class="text-right tabular-nums opacity-60">{format_number(row.previous_seats)}</td>
-              <td :if={@section.other}>
-                <.council_control
-                  parties={@parties}
-                  party_id={@party_id}
-                  control={row.other}
-                  counting={@section.counting}
-                />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <.show_all id={@section.id} shown={length(@rows)} total={@total} />
-      </div>
+      <.section_toggle id={@section.id} title={@section.title} count={@page.total} open={@view.open} />
+      <.sortable_table
+        :if={@view.open and @page.total > 0}
+        sort_key={@section.id}
+        rows={@page.rows}
+        sorts={@sorts}
+        sorted
+        row_id={&"#{@section.id}-#{&1.municipality_id}"}
+        class="mt-2"
+      >
+        <:column :let={row} label="Municipality" field="name" first="asc">
+          <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
+            {row.name}
+          </.link>
+        </:column>
+        <:column :let={row} label="Share" field="share" align="right">
+          {format_percentage(row.share)}
+        </:column>
+        <:column
+          :let={row}
+          label={"#{@previous_year}"}
+          field="previous_share"
+          align="right"
+          class="opacity-60"
+        >
+          {format_percentage(row.previous_share)}
+        </:column>
+        <:column :let={row} label="Swing" field="swing" align="right" class={&delta_class(&1.swing)}>
+          {format_delta(row.swing, :points)}
+        </:column>
+        <:column :let={row} label="Seats" field="seats" align="right">
+          {format_number(row.seats)}
+        </:column>
+        <:column
+          :let={row}
+          label={"#{@previous_year}"}
+          field="previous_seats"
+          align="right"
+          class="opacity-60"
+        >
+          {format_number(row.previous_seats)}
+        </:column>
+        <:column
+          :let={row}
+          :if={@section.other}
+          label={@section.other}
+          field="other_label"
+          first="asc"
+        >
+          <.council_control
+            parties={@parties}
+            party_id={@party_id}
+            control={row.other}
+            counting={@section.counting}
+          />
+        </:column>
+        <.show_all id={@section.id} shown={@page.shown} total={@page.total} />
+      </.sortable_table>
     </section>
     """
   end
 
-  attr :section, :map, required: true
-  attr :rows, :list, required: true
-  attr :total, :integer, required: true
-  attr :open, :boolean, required: true
+  attr :view, :map, required: true, doc: "`%{section, page, open}`"
   attr :parties, :map, required: true
   attr :previous_year, :integer, required: true
   attr :sorts, :map, required: true
 
   defp ward_section(assigns) do
+    assigns = assign(assigns, section: assigns.view.section, page: assigns.view.page)
+
     ~H"""
     <section id={@section.id} class="panel px-4 py-3">
-      <.section_toggle id={@section.id} title={@section.title} count={@total} open={@open} />
-      <div :if={@open and @total > 0} class="overflow-x-auto mt-2">
-        <table class="table table-sm">
-          <thead>
-            <tr>
-              <.sort_header table={@section.id} column="ward" sorts={@sorts} first="asc">
-                Ward
-              </.sort_header>
-              <.sort_header table={@section.id} column="share" sorts={@sorts} align="right">
-                Share
-              </.sort_header>
-              <.sort_header table={@section.id} column="previous_share" sorts={@sorts} align="right">
-                {@previous_year}
-              </.sort_header>
-              <.sort_header table={@section.id} column="swing" sorts={@sorts} align="right">
-                Swing
-              </.sort_header>
-              <.sort_header
-                :if={@section.other}
-                table={@section.id}
-                column="other_label"
-                sorts={@sorts}
-                first="asc"
-              >
-                {@section.other}
-              </.sort_header>
-              <.sort_header table={@section.id} column="declared_at" sorts={@sorts}>
-                Declared
-              </.sort_header>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={row <- @rows} id={"#{@section.id}-#{row.ward_id}"}>
-              <td>
-                <.link
-                  :if={row.municipality_id}
-                  navigate={~p"/municipalities/#{row.municipality_id}"}
-                  class="link"
-                >
-                  {row.municipality_name}
-                </.link>
-                <span :if={is_nil(row.municipality_id)}>{row.municipality_name}</span>
-                ·
-                <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
-                  <.ward_label number={row.ward_number} name={row.ward_name} />
-                </.link>
-                <span :if={row.new_ward} class="badge badge-ghost badge-sm">
-                  {if row.redrawn, do: "redrawn", else: "new ward"}
-                </span>
-              </td>
-              <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-              <td class="text-right tabular-nums opacity-60">
-                {format_percentage(row.previous_share)}
-              </td>
-              <td class={["text-right tabular-nums", delta_class(row.swing)]}>
-                {format_delta(row.swing, :points)}
-              </td>
-              <td :if={@section.other}>
-                <.party_or_dash
-                  parties={@parties}
-                  party_id={row.other}
-                  empty="another party"
-                />
-              </td>
-              <td class="tabular-nums opacity-75"><.declared_at ward={row} /></td>
-            </tr>
-          </tbody>
-        </table>
-        <.show_all id={@section.id} shown={length(@rows)} total={@total} />
-      </div>
+      <.section_toggle id={@section.id} title={@section.title} count={@page.total} open={@view.open} />
+      <.sortable_table
+        :if={@view.open and @page.total > 0}
+        sort_key={@section.id}
+        rows={@page.rows}
+        sorts={@sorts}
+        sorted
+        row_id={&"#{@section.id}-#{&1.ward_id}"}
+        class="mt-2"
+      >
+        <:column :let={row} label="Ward" field="ward" first="asc">
+          <.link
+            :if={row.municipality_id}
+            navigate={~p"/municipalities/#{row.municipality_id}"}
+            class="link"
+          >
+            {row.municipality_name}
+          </.link>
+          <span :if={is_nil(row.municipality_id)}>{row.municipality_name}</span>
+          ·
+          <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
+            <.ward_label number={row.ward_number} name={row.ward_name} />
+          </.link>
+          <span :if={row.new_ward} class="badge badge-ghost badge-sm">
+            {if row.redrawn, do: "redrawn", else: "new ward"}
+          </span>
+        </:column>
+        <:column :let={row} label="Share" field="share" align="right">
+          {format_percentage(row.share)}
+        </:column>
+        <:column
+          :let={row}
+          label={"#{@previous_year}"}
+          field="previous_share"
+          align="right"
+          class="opacity-60"
+        >
+          {format_percentage(row.previous_share)}
+        </:column>
+        <:column :let={row} label="Swing" field="swing" align="right" class={&delta_class(&1.swing)}>
+          {format_delta(row.swing, :points)}
+        </:column>
+        <:column
+          :let={row}
+          :if={@section.other}
+          label={@section.other}
+          field="other_label"
+          first="asc"
+        >
+          <.party_or_dash parties={@parties} party_id={row.other} empty="another party" />
+        </:column>
+        <:column :let={row} label="Declared" field="declared_at" class="tabular-nums opacity-75">
+          <.declared_at ward={row} />
+        </:column>
+        <.show_all id={@section.id} shown={@page.shown} total={@page.total} />
+      </.sortable_table>
     </section>
     """
   end

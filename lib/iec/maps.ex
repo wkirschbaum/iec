@@ -17,12 +17,14 @@ defmodule Iec.Maps do
   alias Iec.Results.{Feed, PartyWardResult}
   alias Iec.Maps.{Boundary, Geometry}
 
-  # File on the IEC's map server, and the simplification tolerance in map units
-  # (about 110 m each): coarser for big areas, finer for wards.
-  @boundary_files [
-    province: {"nationalProvince", 8},
-    municipality: {"nationalMunic", 4},
-    ward: {"nationalWard", 1}
+  # Each outline set: whose, which level, the file on the IEC's map server, and the
+  # simplification tolerance in map units (about 110 m each): coarser for big areas,
+  # finer for wards. The previous election's wards are only compared with the live ones.
+  @boundary_sets [
+    {:live, :province, "nationalProvince", 8},
+    {:live, :municipality, "nationalMunic", 4},
+    {:live, :ward, "nationalWard", 1},
+    {:previous, :ward, "nationalWard", 2}
   ]
 
   # Coarser ward outlines for showing every ward in the country at once.
@@ -37,28 +39,28 @@ defmodule Iec.Maps do
   minute; after that it does nothing.
   """
   def import_boundaries do
-    live = Feed.live_election()
-    previous = Feed.previous_election()
+    elections = %{live: Feed.live_election(), previous: Feed.previous_election()}
 
-    sets =
-      for {level, file_and_tolerance} <- @boundary_files,
-          do: {live, level, file_and_tolerance}
-
-    for {election, level, {file, tolerance}} <- sets ++ [{previous, :ward, {"nationalWard", 2}}],
+    for {which, level, file, tolerance} <- @boundary_sets,
+        election = elections[which],
         not imported?(election.year, level) do
-      url = Feed.map_url(election, file)
-
-      case Feed.get(url, %{etag: nil, last_modified: nil}, receive_timeout: :timer.minutes(3)) do
-        {:ok, %{"features" => features}, _body, _cache} ->
-          store_boundaries(election.year, level, features, tolerance)
-
-        other ->
-          Logger.warning("Map outlines: #{url} failed (#{inspect(other)})")
-      end
+      import_boundary_set(election, level, file, tolerance)
     end
 
-    mark_redrawn_wards(live.year, previous.year)
+    mark_redrawn_wards(elections.live.year, elections.previous.year)
     Iec.Cache.invalidate_lasting()
+  end
+
+  defp import_boundary_set(election, level, file, tolerance) do
+    url = Feed.map_url(election, file)
+
+    case Feed.get(url, %{etag: nil, last_modified: nil}, receive_timeout: :timer.minutes(3)) do
+      {:ok, %{"features" => features}, _body, _cache} ->
+        store_boundaries(election.year, level, features, tolerance)
+
+      other ->
+        Logger.warning("Map outlines: #{url} failed (#{inspect(other)})")
+    end
   end
 
   # Stored and complete: wards of the live election also need their overview outline.
@@ -114,20 +116,12 @@ defmodule Iec.Maps do
           []
 
         {path, {min_x, min_y, max_x, max_y}} ->
-          overview =
-            if level == :ward,
-              do:
-                with(
-                  {overview, _box} <- Geometry.to_svg(geometry, @overview_tolerance),
-                  do: overview
-                )
-
           [
             Map.merge(area_attributes(level, properties, municipality_ids), %{
               election: year,
               level: level,
               path: path,
-              overview_path: overview,
+              overview_path: overview_path(level, geometry),
               area: Geometry.area(geometry),
               min_x: min_x,
               min_y: min_y,
@@ -141,6 +135,13 @@ defmodule Iec.Maps do
     |> Enum.uniq_by(& &1.area_id)
   end
 
+  # Wards also get a coarser outline, for the map of every ward at once.
+  defp overview_path(:ward, geometry) do
+    with {path, _box} <- Geometry.to_svg(geometry, @overview_tolerance), do: path
+  end
+
+  defp overview_path(_level, _geometry), do: nil
+
   # A ward counts as redrawn when the previous election's ward with its id covers a
   # clearly different area: its area changed by more than about a fifth, or the two
   # bounding boxes overlap by less than 75%. Smaller edits still count as the same ward.
@@ -150,7 +151,7 @@ defmodule Iec.Maps do
     redrawn =
       for ward <- ward_shapes(live_year),
           before = previous[ward.area_id],
-          before != nil and reshaped?(ward, before),
+          reshaped?(ward, before),
           do: ward.area_id
 
     live_wards =
@@ -194,18 +195,6 @@ defmodule Iec.Maps do
     if union > 0, do: intersection / union, else: 0
   end
 
-  @doc "Ids of the live election's wards whose outline changed since the previous election."
-  def list_redrawn_ward_ids do
-    Repo.all(
-      from boundary in Boundary,
-        where:
-          boundary.election == ^Results.live_year() and boundary.level == :ward and
-            boundary.redrawn,
-        select: boundary.area_id
-    )
-    |> MapSet.new()
-  end
-
   # The national ward file names each ward's municipality but leaves out its id.
   defp municipality_ids_by_name do
     Repo.all(
@@ -243,6 +232,18 @@ defmodule Iec.Maps do
   end
 
   ## Reading
+
+  @doc "Ids of the live election's wards whose outline changed since the previous election."
+  def list_redrawn_ward_ids do
+    Repo.all(
+      from boundary in Boundary,
+        where:
+          boundary.election == ^Results.live_year() and boundary.level == :ward and
+            boundary.redrawn,
+        select: boundary.area_id
+    )
+    |> MapSet.new()
+  end
 
   @doc """
   The outlines of one level, optionally within a province or municipality.
@@ -344,17 +345,12 @@ defmodule Iec.Maps do
       Results.list_latest_snapshots(election: Results.previous_year(), level: level)
       |> Map.new(&{&1.area_id, Results.leading_party(&1)})
 
+    wanted_ids = MapSet.new(area_ids)
+
     for snapshot <- Results.list_latest_snapshots(level: level),
-        snapshot.area_id in area_ids,
+        snapshot.area_id in wanted_ids,
         leader = Results.leading_party(snapshot),
         into: %{} do
-      status =
-        cond do
-          (snapshot.voting_districts_complete || 0) == 0 -> :none
-          snapshot.voting_districts_complete >= snapshot.voting_districts_expected -> :complete
-          true -> :counting
-        end
-
       previous = previous_leaders[snapshot.area_id]
       lead = Contests.lead(snapshot)
 
@@ -362,7 +358,7 @@ defmodule Iec.Maps do
        %{
          leader: leader.party_id,
          share: leader.vote_percentage,
-         status: status,
+         status: count_status(snapshot),
          previous_leader: previous && previous.party_id,
          runner_up: lead && lead.runner_up.party_id,
          margin: lead && lead.margin,
@@ -402,6 +398,14 @@ defmodule Iec.Maps do
          ballots: nil,
          spoilt_share: nil
        }}
+    end
+  end
+
+  defp count_status(snapshot) do
+    cond do
+      (snapshot.voting_districts_complete || 0) == 0 -> :none
+      snapshot.voting_districts_complete >= snapshot.voting_districts_expected -> :complete
+      true -> :counting
     end
   end
 

@@ -23,30 +23,25 @@ defmodule IecWeb.StatusLive do
   # Read after every update and every ten seconds; party feeds are not broadcast to pages.
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
+    # Every poller, party files included (`@feed_statuses` from LiveUpdates holds only the
+    # main feeds, and drives the header).
+    {main_feeds, party_feeds} =
+      Iec.Results.Poller.statuses()
+      |> Map.values()
+      |> Enum.split_with(&(not String.starts_with?(&1.feed, "party-")))
+
     assign(socket,
       system: Status.system(),
       imports: Status.imports(),
-      # Every poller, party files included (`@feed_statuses` from LiveUpdates holds only
-      # the main feeds, and drives the header).
-      poller_statuses: Iec.Results.Poller.statuses()
+      main_feeds: Enum.sort_by(main_feeds, &feed_order/1),
+      party_feed_count: length(party_feeds),
+      failing_parties: Enum.filter(party_feeds, &match?({:error, _}, &1.result)),
+      waiting_parties: Enum.count(party_feeds, &(&1.result == :no_file))
     )
   end
 
   @impl Phoenix.LiveView
   def render(assigns) do
-    {main_feeds, party_feeds} =
-      assigns.poller_statuses
-      |> Map.values()
-      |> Enum.split_with(&(not String.starts_with?(&1.feed, "party-")))
-
-    assigns =
-      assign(assigns,
-        main_feeds: Enum.sort_by(main_feeds, &feed_order/1),
-        party_feeds: party_feeds,
-        failing_parties: Enum.filter(party_feeds, &match?({:error, _}, &1.result)),
-        waiting_parties: Enum.count(party_feeds, &(&1.result == :no_file))
-      )
-
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
       <.page_header eyebrow="Status" title="What is up">
@@ -102,14 +97,12 @@ defmodule IecWeb.StatusLive do
       <section class="space-y-4">
         <.section_heading title="Party files">
           <:subtitle>
-            {length(@party_feeds)} followed · {@waiting_parties} not published yet · {length(
+            {@party_feed_count} followed · {@waiting_parties} not published yet · {length(
               @failing_parties
             )} failing
           </:subtitle>
         </.section_heading>
-        <p :if={@failing_parties == []} class="text-sm text-base-content/60">
-          No party file is failing.
-        </p>
+        <.empty :if={@failing_parties == []}>No party file is failing.</.empty>
         <div :if={@failing_parties != []} class="panel p-2 sm:p-4">
           <table id="failing-parties" class="table table-sm">
             <thead>

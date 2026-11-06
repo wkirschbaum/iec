@@ -19,7 +19,10 @@ defmodule Iec.Results do
   @topic "results"
   @feed_topic "feeds"
 
-  @doc "Subscribes the caller to `{:results_changed, snapshot_ids}` and `:parties_refreshed`."
+  @doc """
+  Subscribes the caller to `{:results_changed, snapshot_ids}`, `:parties_refreshed` and
+  `:places_imported`.
+  """
   def subscribe, do: Phoenix.PubSub.subscribe(Iec.PubSub, @topic)
 
   @doc "Announces a change in the stored results; cached page data goes stale first."
@@ -31,9 +34,11 @@ defmodule Iec.Results do
   @doc "Subscribes the caller to `{:feed_status, status}` after every poll of every feed."
   def subscribe_feed_status, do: Phoenix.PubSub.subscribe(Iec.PubSub, @feed_topic)
 
+  @doc "Announces a feed's status after a poll (`Iec.Results.Poller`)."
   def broadcast_feed_status(status),
     do: Phoenix.PubSub.broadcast(Iec.PubSub, @feed_topic, {:feed_status, status})
 
+  @doc "The year of the live election (polled) and of the previous one (compared with)."
   def live_year, do: Feed.live_election().year
   def previous_year, do: Feed.previous_election().year
 
@@ -69,21 +74,7 @@ defmodule Iec.Results do
     areas = Parser.parse(feed.kind, data)
 
     Repo.transact(fn ->
-      fetch =
-        Repo.insert!(
-          %Fetch{
-            election: feed.election,
-            feed: feed.name,
-            url: feed.url,
-            etag: validators[:etag],
-            last_modified: validators[:last_modified],
-            report_date: Parser.report_date(data),
-            body_bytes: byte_size(body),
-            body: :zlib.gzip(body)
-          },
-          log: false
-        )
-
+      fetch = record_fetch!(feed, data, body, validators, keep_body: true)
       latest = latest_snapshots_by_area(feed.election, areas)
 
       snapshots =
@@ -128,6 +119,50 @@ defmodule Iec.Results do
     |> Map.new(&{{&1.level, &1.area_id}, &1})
   end
 
+  ## Fetches
+
+  @doc """
+  Records a downloaded file in `fetches`: its feed, validators, report time and size.
+  With `keep_body: true` the gzipped body is kept too, so the history can be re-read.
+  """
+  def record_fetch!(feed, data, body, validators, options \\ []) do
+    Repo.insert!(
+      %Fetch{
+        election: feed.election,
+        feed: feed.name,
+        url: feed.url,
+        etag: validators[:etag],
+        last_modified: validators[:last_modified],
+        report_date: Parser.report_date(data),
+        body_bytes: byte_size(body),
+        body: if(options[:keep_body], do: :zlib.gzip(body))
+      },
+      # The body is large; it has no place in the query log.
+      log: false
+    )
+  end
+
+  @doc """
+  Records an election's file as read without its content (a municipality file whose rows
+  are stored, or a party file the IEC does not have), so it is not asked for again.
+  """
+  def record_read!(year, feed_name, url),
+    do: Repo.insert!(%Fetch{election: year, feed: feed_name, url: url, body_bytes: 0})
+
+  @doc """
+  The names of an election's stored files, optionally only those starting with `prefix`
+  ("party-", "munic-"), as a set: read once per pass, not asked per file.
+  """
+  def list_stored_feeds(year, prefix \\ "") do
+    Repo.all(
+      from fetch in Fetch,
+        where: fetch.election == ^year and like(fetch.feed, ^"#{prefix}%"),
+        distinct: true,
+        select: fetch.feed
+    )
+    |> MapSet.new()
+  end
+
   @doc """
   Imports the previous election's final results, file by file, skipping files already
   stored (so a failed file is retried on the next start). Its files no longer change.
@@ -153,8 +188,7 @@ defmodule Iec.Results do
 
   @doc "Imports an election's national and province files not stored yet."
   def import_election(election) do
-    imported =
-      Repo.all(from fetch in Fetch, where: fetch.election == ^election.year, select: fetch.feed)
+    imported = list_stored_feeds(election.year)
 
     for feed <- Feed.feeds(election), feed.name not in imported do
       with {:error, reason} <- import_feed(feed) do
@@ -297,15 +331,30 @@ defmodule Iec.Results do
     |> Repo.all()
   end
 
+  @doc """
+  Every area at a level, from its latest live snapshot, keyed by area id:
+  `%{id, name, province_id, complete}`. `complete` says a municipality's count is
+  finished (the IEC marks it so); it is false for the other levels.
+  """
+  def list_area_summaries(level) do
+    level
+    |> latest_live_areas()
+    |> select([snapshot], %{
+      id: snapshot.area_id,
+      name: snapshot.area_name,
+      province_id: snapshot.province_id,
+      complete: snapshot.municipalities_complete == 1
+    })
+    |> Repo.all()
+    |> Map.new(&{&1.id, %{&1 | complete: level == :municipality and &1.complete}})
+  end
+
   @doc "Area id → name for every area at a level, from the latest live snapshots."
   def list_area_names(level) do
-    Repo.all(
-      from snapshot in Snapshot,
-        where: snapshot.election == ^live_year() and snapshot.level == ^level,
-        distinct: snapshot.area_id,
-        order_by: [asc: snapshot.area_id, desc: snapshot.id],
-        select: {snapshot.area_id, snapshot.area_name}
-    )
+    level
+    |> latest_live_areas()
+    |> select([snapshot], {snapshot.area_id, snapshot.area_name})
+    |> Repo.all()
     |> Map.new()
   end
 
@@ -337,15 +386,18 @@ defmodule Iec.Results do
 
   @doc "The name of an area in its latest live snapshot, or nil."
   def get_area_name(level, area_id) do
-    Repo.one(
-      from snapshot in Snapshot,
-        where:
-          snapshot.election == ^live_year() and snapshot.level == ^level and
-            snapshot.area_id == ^area_id,
-        order_by: [desc: snapshot.id],
-        limit: 1,
-        select: snapshot.area_name
-    )
+    level
+    |> latest_live_areas()
+    |> where([snapshot], snapshot.area_id == ^area_id)
+    |> select([snapshot], snapshot.area_name)
+    |> Repo.one()
+  end
+
+  # The latest live snapshot of each area at a level.
+  defp latest_live_areas(level) do
+    Snapshot
+    |> filter_snapshots(election: live_year(), level: level)
+    |> latest_per_area()
   end
 
   defp party_results_query, do: from(party_result in PartyResult, order_by: party_result.position)

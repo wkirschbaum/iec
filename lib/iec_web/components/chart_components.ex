@@ -8,7 +8,8 @@ defmodule IecWeb.ChartComponents do
   """
   use IecWeb, :html
 
-  import IecWeb.ResultsComponents, only: [format_compact: 1]
+  import IecWeb.ResultsComponents,
+    only: [format_compact: 1, format_decimal: 2, format_percentage: 2]
 
   attr :id, :string, required: true
   attr :trend, :map, required: true, doc: "`%{years, series, max, step}`"
@@ -161,7 +162,7 @@ defmodule IecWeb.ChartComponents do
       end)
   end
 
-  defp coordinate(number), do: :erlang.float_to_binary(number / 1, decimals: 2)
+  defp coordinate(number), do: format_decimal(number, 2)
 
   defp gridlines(max, step) do
     count = round(max / step)
@@ -177,6 +178,6 @@ defmodule IecWeb.ChartComponents do
     if thousands == Float.round(thousands), do: round(thousands), else: Float.round(thousands, 1)
   end
 
-  defp value_label(value, :percent), do: :erlang.float_to_binary(value / 1, decimals: 1) <> "%"
+  defp value_label(value, :percent), do: format_percentage(value, 1)
   defp value_label(value, :count), do: format_compact(round(value))
 end

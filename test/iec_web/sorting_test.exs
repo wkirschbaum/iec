@@ -36,4 +36,15 @@ defmodule IecWeb.SortingTest do
       assert Sorting.sort_rows(@rows, {"no such column ever", :asc}) == @rows
     end
   end
+
+  describe "sorted_page/3" do
+    test "sorts, then takes the first rows, counting them all" do
+      assert %{rows: [%{name: "Cape Town"}], shown: 1, total: 3} =
+               Sorting.sorted_page(@rows, {"share", :desc}, 1)
+    end
+
+    test "shows every row when the limit is past the end" do
+      assert %{shown: 3, total: 3} = Sorting.sorted_page(@rows, nil, 25)
+    end
+  end
 end

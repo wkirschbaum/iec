@@ -1,5 +1,9 @@
 defmodule Iec.Results.Fetch do
-  @moduledoc "A feed download that returned new content, with its gzipped body."
+  @moduledoc """
+  A downloaded file with new content (national and province files keep their gzipped
+  body), or a record that a one-off file was read or does not exist, so it is not asked
+  for again (`Iec.Results.record_read!/3`).
+  """
   use Ecto.Schema
 
   schema "fetches" do

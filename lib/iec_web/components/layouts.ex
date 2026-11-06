@@ -5,6 +5,9 @@ defmodule IecWeb.Layouts do
   """
   use IecWeb, :html
 
+  import IecWeb.ResultsComponents,
+    only: [format_clock: 1, format_number: 1, format_progress: 1, percentage_of: 2]
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -53,10 +56,6 @@ defmodule IecWeb.Layouts do
   attr :feed_status, :map,
     default: nil,
     doc: "`%{feeds, failing, checked_at}` from IecWeb.LiveUpdates, shown in the header"
-
-  attr :current_scope, :map,
-    default: nil,
-    doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
   slot :inner_block, required: true
 
@@ -144,7 +143,7 @@ defmodule IecWeb.Layouts do
     assigns =
       assign(assigns,
         percentage:
-          IecWeb.ResultsComponents.percentage_of(
+          percentage_of(
             assigns.progress.voting_districts_complete,
             assigns.progress.voting_districts_expected
           )
@@ -186,7 +185,7 @@ defmodule IecWeb.Layouts do
       <div class={[container(), "flex items-center gap-6 py-2 md:py-2.5"]}>
         <div class="flex items-baseline gap-2">
           <span class="font-serif text-2xl font-semibold tabular-nums tracking-tight text-primary md:text-3xl">
-            {IecWeb.ResultsComponents.format_progress(@percentage)}
+            {format_progress(@percentage)}
           </span>
           <span class="eyebrow">counted</span>
         </div>
@@ -216,13 +215,13 @@ defmodule IecWeb.Layouts do
 
         <div class="ml-auto text-right leading-tight">
           <div class="text-sm font-medium tabular-nums">
-            {IecWeb.ResultsComponents.format_number(@progress.total_votes_cast)}
+            {format_number(@progress.total_votes_cast)}
             <span class="font-normal opacity-60">votes</span>
           </div>
           <div class="flex items-center justify-end gap-3 text-xs tabular-nums">
             <.feed_indicator :if={@feed_status} status={@feed_status} />
             <span class="hidden whitespace-nowrap opacity-60 sm:inline">
-              IEC report {IecWeb.ResultsComponents.format_clock(@progress.report_date)}
+              IEC report {format_clock(@progress.report_date)}
             </span>
           </div>
         </div>
@@ -265,13 +264,13 @@ defmodule IecWeb.Layouts do
   defp count_ring(assigns) do
     assigns =
       assign(assigns,
-        percentage: IecWeb.ResultsComponents.percentage_of(assigns.complete, assigns.expected)
+        percentage: percentage_of(assigns.complete, assigns.expected)
       )
 
     ~H"""
     <div
       class="flex items-center gap-2"
-      title={"#{IecWeb.ResultsComponents.format_number(@complete)} of #{IecWeb.ResultsComponents.format_number(@expected)}"}
+      title={"#{format_number(@complete)} of #{format_number(@expected)}"}
     >
       <div class="relative size-8">
         <div class="absolute inset-0 rounded-full border-[3px] border-base-300" />
@@ -301,17 +300,10 @@ defmodule IecWeb.Layouts do
       class="flex items-center gap-1.5 hover:underline"
       title="Feed status"
     >
-      <span class={[
-        "inline-block size-2 rounded-full",
-        cond do
-          @status.feeds == 0 -> "bg-base-300"
-          @status.failing > 0 -> "bg-error"
-          true -> "bg-success motion-safe:animate-pulse"
-        end
-      ]} />
+      <span class={["inline-block size-2 rounded-full", feed_dot(@status)]} />
       <span :if={@status.feeds == 0} class="opacity-60">Polling off</span>
       <span :if={@status.feeds > 0} class="whitespace-nowrap opacity-75">
-        Live · checked {IecWeb.ResultsComponents.format_clock(@status.checked_at)}
+        Live · checked {format_clock(@status.checked_at)}
         <span :if={@status.failing > 0} class="text-error">
           · {@status.failing}/{@status.feeds} failing
         </span>
@@ -319,6 +311,10 @@ defmodule IecWeb.Layouts do
     </.link>
     """
   end
+
+  defp feed_dot(%{feeds: 0}), do: "bg-base-300"
+  defp feed_dot(%{failing: failing}) when failing > 0, do: "bg-error"
+  defp feed_dot(_healthy), do: "bg-success motion-safe:animate-pulse"
 
   # Header, page and footer share one container, so their left edges line up.
   defp container, do: "mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8"

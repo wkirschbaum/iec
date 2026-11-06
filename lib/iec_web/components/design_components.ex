@@ -1,18 +1,17 @@
 defmodule IecWeb.DesignComponents do
   @moduledoc """
-  The building blocks of every page's look: page headers, section headings, key figures,
-  the vote-share bar and swing chips. See docs/design.md.
+  The building blocks of every page's look: page headers, section headings, linked rows
+  and cards, key figures, the vote-share bar and swing chips. See docs/design.md.
   """
   use IecWeb, :html
 
-  import IecWeb.ResultsComponents,
-    only: [format_percentage: 1, party_abbreviation: 2, party_colour: 2]
+  import IecWeb.ResultsComponents
 
   attr :eyebrow, :string, default: nil
   attr :live, :boolean, default: false, doc: "a pulsing dot before the eyebrow while counting"
   attr :accent, :string, default: nil, doc: "a colour shown as a bar beside the title"
   attr :title, :string, required: true
-  slot :breadcrumb
+  attr :crumbs, :list, default: [], doc: "the pages above this one, `[{label, path}]`"
   slot :lede
   slot :actions
 
@@ -21,9 +20,11 @@ defmodule IecWeb.DesignComponents do
     ~H"""
     <header class="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
       <div class="max-w-3xl space-y-2">
-        <div :if={@breadcrumb != []} class="text-sm text-base-content/60">
-          {render_slot(@breadcrumb)}
-        </div>
+        <nav :if={@crumbs != []} class="text-sm text-base-content/60" aria-label="Breadcrumb">
+          <span :for={{label, path} <- @crumbs}>
+            <.link navigate={path} class="link-hover link">{label}</.link> /
+          </span>
+        </nav>
         <p :if={@eyebrow} class="eyebrow flex items-center gap-2">
           <span :if={@live} class="relative flex size-2">
             <span class="absolute inline-flex size-full motion-safe:animate-ping rounded-full bg-primary/50" />
@@ -45,6 +46,84 @@ defmodule IecWeb.DesignComponents do
       </div>
       <div :if={@actions != []} class="flex flex-wrap gap-2">{render_slot(@actions)}</div>
     </header>
+    """
+  end
+
+  attr :eyebrow, :string, required: true
+  attr :title, :string, default: "Not found"
+  slot :inner_block, required: true, doc: "why, and where to look instead"
+
+  @doc "The opening of a page for something with no results yet, or that does not exist."
+  def not_found(assigns) do
+    ~H"""
+    <.page_header eyebrow={@eyebrow} title={@title} crumbs={[{"Overview", ~p"/"}]}>
+      <:lede>{render_slot(@inner_block)}</:lede>
+    </.page_header>
+    """
+  end
+
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  @doc "A quiet note where a section has nothing to show yet."
+  def empty(assigns) do
+    ~H"""
+    <p class="text-sm text-base-content/60" {@rest}>{render_slot(@inner_block)}</p>
+    """
+  end
+
+  attr :navigate, :string, required: true
+  attr :id, :string, default: nil
+  attr :class, :any, default: "min-h-12 py-2.5", doc: "height and padding, and any more"
+  attr :chevron, :boolean, default: true
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  @doc """
+  A row of a linked list (inside `<ul class="panel divide-y …">`): the whole row is one
+  link, with a chevron that nudges on hover.
+  """
+  def link_row(assigns) do
+    ~H"""
+    <.link
+      navigate={@navigate}
+      id={@id}
+      class={[
+        "group flex items-center gap-3 px-4 transition-colors hover:bg-base-200/70 focus-visible:bg-base-200 focus-visible:outline-none",
+        @class
+      ]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+      <.icon
+        :if={@chevron}
+        name="hero-chevron-right-micro"
+        class="size-4 text-base-content/30 transition-transform group-hover:translate-x-0.5"
+      />
+    </.link>
+    """
+  end
+
+  attr :navigate, :string, required: true
+  attr :id, :string, default: nil
+  attr :class, :any, default: "block space-y-3 p-5", doc: "layout and padding"
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  @doc "A card that is one link, raised slightly on hover."
+  def link_card(assigns) do
+    ~H"""
+    <.link
+      navigate={@navigate}
+      id={@id}
+      class={[
+        "panel group transition-all hover:-translate-y-0.5 hover:border-base-content/20 hover:shadow-lg focus-visible:outline-2 focus-visible:outline-primary",
+        @class
+      ]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </.link>
     """
   end
 
@@ -110,6 +189,101 @@ defmodule IecWeb.DesignComponents do
     """
   end
 
+  attr :label, :string, required: true
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+
+  @doc "A key figure that is not a number, such as a party: a small label over it."
+  def fact(assigns) do
+    ~H"""
+    <div class={["min-w-0", @class]}>
+      <div class="eyebrow">{@label}</div>
+      <div class="mt-2 space-y-1">{render_slot(@inner_block)}</div>
+    </div>
+    """
+  end
+
+  attr :parties, :map, required: true
+  attr :control, :map, default: nil, doc: "from Iec.Parties.get_council_control/1"
+  attr :decided, :boolean, required: true, doc: "whether the council's count is finished"
+  slot :inner_block, doc: "more under it, such as who ran it before"
+
+  @doc "Who runs a council now, or who leads it while its count runs."
+  def council_fact(assigns) do
+    ~H"""
+    <.fact label={if @decided, do: "Council now", else: "Council so far"}>
+      <.council_control parties={@parties} control={@control} counting={not @decided} />
+      {render_slot(@inner_block)}
+    </.fact>
+    """
+  end
+
+  attr :snapshot, :map, required: true
+
+  @doc "How many voting districts are counted: the share, and how many of how many."
+  def districts_kpi(assigns) do
+    ~H"""
+    <.kpi
+      label="Districts counted"
+      value={
+        format_progress(@snapshot.voting_districts_complete, @snapshot.voting_districts_expected)
+      }
+    >
+      {format_number(@snapshot.voting_districts_complete)} of {format_number(
+        @snapshot.voting_districts_expected
+      )}
+    </.kpi>
+    """
+  end
+
+  attr :snapshot, :map, required: true, doc: "the national or a province's snapshot"
+  slot :votes_note, required: true, doc: "under the votes counted"
+
+  @doc "The count's key figures for an area of many councils: districts, votes, councils."
+  def count_kpis(assigns) do
+    ~H"""
+    <.districts_kpi snapshot={@snapshot} />
+    <.kpi label="Votes counted" value={format_compact(@snapshot.total_votes_cast)}>
+      {render_slot(@votes_note)}
+    </.kpi>
+    <.kpi
+      label="Councils decided"
+      value={"#{@snapshot.municipalities_complete} / #{@snapshot.municipalities_expected}"}
+    >
+      {@snapshot.majority_councils} with a majority
+    </.kpi>
+    <.kpi label="Hung councils" value={format_number(@snapshot.hung_councils)}>
+      no party over half the seats
+    </.kpi>
+    """
+  end
+
+  attr :highlights, :list, required: true, doc: "from IecWeb.ChangeDigest.highlights/1"
+  attr :parties, :map, required: true
+  attr :area, :string, default: nil, doc: "the area they are in, when not the whole country"
+
+  @doc "Leads changing hands and councils decided, newest first."
+  def highlights(assigns) do
+    ~H"""
+    <section class="space-y-4">
+      <.section_heading title="Highlights">
+        <:subtitle>
+          Leads changing hands and councils decided{if @area, do: " in #{@area}"}
+        </:subtitle>
+        <:actions :if={is_nil(@area)}>
+          <.link navigate={~p"/changes"} class="link-hover link">All changes →</.link>
+        </:actions>
+      </.section_heading>
+      <.empty :if={@highlights == []}>
+        No lead has changed hands{if @area, do: " here"} since start-up.
+      </.empty>
+      <ul :if={@highlights != []} class="panel divide-y divide-base-300">
+        <.highlight :for={event <- @highlights} event={event} parties={@parties} />
+      </ul>
+    </section>
+    """
+  end
+
   attr :value, :any, required: true, doc: "a swing in percentage points, or nil"
   attr :class, :string, default: nil
 
@@ -134,7 +308,7 @@ defmodule IecWeb.DesignComponents do
         @value < 0 -> "▼"
         true -> "■"
       end}
-      {:erlang.float_to_binary(abs(@value) / 1, decimals: 1)}
+      {format_decimal(abs(@value))}
     </span>
     <span
       :if={is_nil(@value)}
@@ -319,15 +493,15 @@ defmodule IecWeb.DesignComponents do
 
     coordinates =
       Enum.map(points, fn {year, value} ->
-        "#{:erlang.float_to_binary(x.(year) / 1, decimals: 1)} #{:erlang.float_to_binary(y.(value) / 1, decimals: 1)}"
+        "#{format_decimal(x.(year))} #{format_decimal(y.(value))}"
       end)
 
     {_year, last_value} = List.last(points)
 
     %{
       path: "M" <> Enum.join(coordinates, "L"),
-      last_x: :erlang.float_to_binary(x.(last_year) / 1, decimals: 1),
-      last_y: :erlang.float_to_binary(y.(last_value) / 1, decimals: 1)
+      last_x: format_decimal(x.(last_year)),
+      last_y: format_decimal(y.(last_value))
     }
   end
 

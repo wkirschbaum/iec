@@ -7,10 +7,14 @@ defmodule IecWeb.LiveUpdates do
 
   It assigns `@parties` (names and colours), `@feed_status` (the header) and
   `@count_progress` (the sticky footer), `@refreshed_at` (changes on every refresh, for
-  live components such as maps to pick up),
-  keeps both current, and calls the view's `refresh/1` when results or party files
-  change. A poll round lands as several messages within seconds, so refreshes are
-  coalesced: at most one per second.
+  live components such as maps to pick up), keeps them current, and calls the view's
+  `refresh/1` when results or party files change. A poll round lands as several
+  messages within seconds, so refreshes are coalesced: at most one per second.
+
+  A page computes its data once per change and shares it with everyone viewing it:
+
+      def refresh(socket),
+        do: LiveUpdates.assign_cached(socket, {__MODULE__, socket.assigns.ward_id}, &load/1)
   """
   import Phoenix.Component, only: [assign: 2, assign: 3, update: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, push_event: 3]
@@ -24,6 +28,13 @@ defmodule IecWeb.LiveUpdates do
   @refresh_spread Application.compile_env(:iec, [IecWeb.LiveUpdates, :refresh_spread], 2_000)
 
   @callback refresh(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+
+  @doc """
+  Assigns what `load` computes from the assigns, once per data change for `key` and
+  shared by everyone viewing the same page.
+  """
+  def assign_cached(socket, key, load),
+    do: assign(socket, Iec.Cache.fetch(key, fn -> load.(socket.assigns) end))
 
   def on_mount(topics, _params, _session, socket) do
     if connected?(socket) do

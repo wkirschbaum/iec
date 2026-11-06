@@ -36,7 +36,7 @@ defmodule Iec.Places do
 
       true ->
         with {:ok, elements} <- Overpass.fetch_places() do
-          {:ok, elements |> parse() |> store()}
+          {:ok, elements |> parse() |> place_in_wards() |> store()}
         end
     end
   end
@@ -110,22 +110,24 @@ defmodule Iec.Places do
     end
   end
 
-  # Places each place in the ward holding it, and stores them all.
-  defp store(places) do
+  # Each place with the live ward whose outline holds its point (nil ids for none).
+  defp place_in_wards(places) do
     wards = ward_shapes()
+
+    for place <- places do
+      point = Geometry.project_point(place.longitude, place.latitude)
+      ward = Enum.find(wards, &inside?(&1, point))
+
+      Map.merge(place, %{
+        ward_id: ward && ward.area_id,
+        municipality_id: ward && ward.municipality_id
+      })
+    end
+  end
+
+  defp store(places) do
     now = DateTime.utc_now()
-
-    rows =
-      for place <- places do
-        point = Geometry.project_point(place.longitude, place.latitude)
-        ward = Enum.find(wards, &inside?(&1, point))
-
-        Map.merge(place, %{
-          ward_id: ward && ward.area_id,
-          municipality_id: ward && ward.municipality_id,
-          inserted_at: now
-        })
-      end
+    rows = Enum.map(places, &Map.put(&1, :inserted_at, now))
 
     rows
     |> Enum.chunk_every(2_000)

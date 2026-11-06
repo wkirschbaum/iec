@@ -178,4 +178,88 @@ defmodule IecWeb.TableRows do
       Map.put(row, label_field, party_id && party_abbreviation(parties, %{party_id: party_id}))
     end)
   end
+
+  @doc """
+  A council's parties: every followed party from the party files (`Iec.Parties`'
+  municipality overview), or without them the province feed's top three, from the
+  snapshots.
+  """
+  def council_party_rows([], snapshot, previous_snapshot, parties),
+    do: party_rows(snapshot, previous_snapshot, parties)
+
+  def council_party_rows(overview_parties, _snapshot, _previous_snapshot, parties),
+    do: with_party_name(overview_parties, parties, :party_id, :party)
+
+  @doc """
+  A council's wards (`Iec.Parties.get_municipality_overview/1`) with sortable names for
+  the winner now and before, and the places in each.
+  """
+  def ward_winner_rows(wards, parties) do
+    wards
+    |> with_party_name(parties, :holder, :holder_name)
+    |> with_party_name(parties, :previous_holder, :previous_holder_name)
+    |> IecWeb.WardNames.with_names()
+  end
+
+  @doc """
+  Wards won per party, most first, from `ward_winner_rows/2`, against who won the same
+  wards in the previous election: only declared wards count on both sides, so the
+  comparison holds while the count runs. `width` and `previous_width` are shares of all
+  the wards, for bars.
+  """
+  def ward_tally(ward_rows, parties) do
+    declared = Enum.filter(ward_rows, & &1.holder)
+    now = Enum.frequencies_by(declared, & &1.holder)
+
+    before =
+      declared |> Enum.filter(& &1.previous_holder) |> Enum.frequencies_by(& &1.previous_holder)
+
+    total = max(length(ward_rows), 1)
+
+    (Map.keys(now) ++ Map.keys(before))
+    |> Enum.uniq()
+    |> Enum.map(fn party_id ->
+      wards = Map.get(now, party_id, 0)
+      previous_wards = Map.get(before, party_id, 0)
+
+      %{
+        party_id: party_id,
+        wards: wards,
+        previous_wards: previous_wards,
+        change: wards - previous_wards,
+        width: wards / total * 100,
+        previous_width: previous_wards / total * 100
+      }
+    end)
+    |> Enum.sort_by(&{-&1.wards, -&1.previous_wards})
+    |> with_party_name(parties, :party_id, :party)
+  end
+
+  @doc """
+  The `limit` closest wards from `Iec.Contests.list_ward_leads/2`, narrowest lead first.
+  A ward whose winner trails on the shares (a negative lead) only counts once declared.
+  """
+  def closest_ward_rows(leads, limit) do
+    leads
+    |> Enum.filter(fn {_ward_id, lead} ->
+      lead.margin != nil and (lead.declared or lead.margin > 0)
+    end)
+    |> Enum.sort_by(fn {_ward_id, lead} -> lead.margin end)
+    |> Enum.take(limit)
+    |> Enum.map(fn {ward_id, lead} ->
+      Map.merge(lead, %{ward_id: ward_id, ward_number: Results.Ward.ward_number(ward_id)})
+    end)
+    |> IecWeb.WardNames.with_names()
+  end
+
+  @doc """
+  Parties by their net gain of wards or councils (`gained` minus `lost`, fields of
+  `Iec.Parties.get_movers/0`' parties), biggest first, leaving out parties with neither.
+  """
+  def net_rows(movers, gained, lost) do
+    movers
+    |> Enum.map(&Map.put(&1, :net, Map.fetch!(&1, gained) - Map.fetch!(&1, lost)))
+    |> Enum.reject(&(Map.fetch!(&1, gained) == 0 and Map.fetch!(&1, lost) == 0))
+    |> Enum.sort_by(& &1.net, :desc)
+  end
 end

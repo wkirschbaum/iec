@@ -43,13 +43,13 @@ defmodule Iec.Application do
              run_setup_step(&Iec.Results.refresh_parties/0)
              run_setup_step(&Iec.Results.import_previous_election/0)
              run_setup_step(&Iec.Results.import_history/0)
-             run_setup_step(&Iec.Parties.follow_national_parties/0)
+             run_setup_step(&Iec.Parties.Import.follow_national_parties/0)
              run_setup_step(&Iec.Maps.import_boundaries/0)
              # Its own task: Overpass may be busy for hours, which must not hold up the rest.
              Task.Supervisor.start_child(Iec.TaskSupervisor, &Iec.Places.complete_import/0)
-             run_setup_step(&Iec.Parties.import_municipality_files/0)
-             run_setup_step(&Iec.Parties.import_previous_ward_results/0)
-             run_setup_step(&Iec.Parties.complete_municipality_files/0)
+             run_setup_step(&Iec.Parties.Import.import_municipality_files/0)
+             run_setup_step(&Iec.Parties.Import.import_previous_ward_results/0)
+             run_setup_step(&Iec.Parties.Import.complete_municipality_files/0)
            end},
           id: :results_setup,
           restart: :temporary

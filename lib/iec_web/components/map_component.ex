@@ -26,7 +26,14 @@ defmodule IecWeb.MapComponent do
   use IecWeb, :live_component
 
   import IecWeb.ResultsComponents,
-    only: [area_path: 1, format_number: 1, party_abbreviation: 2, party_colour: 2]
+    only: [
+      area_path: 1,
+      format_decimal: 1,
+      format_number: 1,
+      format_percentage: 2,
+      party_abbreviation: 2,
+      party_colour: 2
+    ]
 
   alias Iec.Maps
 
@@ -284,20 +291,20 @@ defmodule IecWeb.MapComponent do
         votes = if result.margin_votes, do: " · #{format_number(result.margin_votes)} votes"
 
         "#{leader} ahead of #{party_abbreviation(parties, %{party_id: runner_up})} " <>
-          "by #{decimal(result.margin)} pts#{votes}"
+          "by #{format_decimal(result.margin)} pts#{votes}"
     end
   end
 
   defp describe(%{spoilt_share: nil}, :spoilt, _parties), do: "no spoilt ballot figure"
 
   defp describe(result, :spoilt, _parties) do
-    "#{decimal(result.spoilt_share)}% spoilt · " <>
+    "#{format_percentage(result.spoilt_share, 1)} spoilt · " <>
       "#{format_number(result.spoilt_votes)} of #{format_number(result.ballots)} ballots"
   end
 
   defp describe(result, _leader_or_flips, parties) do
     leader = party_abbreviation(parties, %{party_id: result.leader})
-    share = if result.share, do: " #{decimal(result.share)}%", else: ""
+    share = if result.share, do: " #{format_percentage(result.share, 1)}", else: ""
 
     previous =
       if result.previous_leader,
@@ -306,8 +313,6 @@ defmodule IecWeb.MapComponent do
 
     "#{leader}#{share}#{previous}"
   end
-
-  defp decimal(value), do: :erlang.float_to_binary(value / 1, decimals: 1)
 
   # Legend counts: areas led (or, for flips, won from someone else) per party, or for
   # the figure-based modes, areas per band.

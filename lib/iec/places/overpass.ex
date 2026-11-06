@@ -53,10 +53,10 @@ defmodule Iec.Places.Overpass do
     """
   end
 
-  @doc "Runs one query, trying each instance in turn. `{:ok, elements}` or `{:error, reason}`."
-  def query(query) do
+  # Runs one query, trying each instance in turn: `{:ok, elements}` or `{:error, reason}`.
+  defp query(query) do
     Enum.reduce_while(config(:endpoints), {:error, :no_endpoints}, fn endpoint, _failure ->
-      case query_endpoint(endpoint, query, config(:attempts)) do
+      case query_endpoint(endpoint, query, config(:attempts), config(:first_backoff)) do
         {:ok, elements} ->
           {:halt, {:ok, elements}}
 
@@ -67,8 +67,8 @@ defmodule Iec.Places.Overpass do
     end)
   end
 
-  defp query_endpoint(endpoint, query, attempts_left, wait \\ nil) do
-    wait = wait || config(:first_backoff)
+  # Asks one instance, waiting `wait` milliseconds before a retry (doubling each time).
+  defp query_endpoint(endpoint, query, attempts_left, wait) do
     wait_for_slot(endpoint)
 
     case request(:post, endpoint <> "/interpreter", form: [data: query]) do

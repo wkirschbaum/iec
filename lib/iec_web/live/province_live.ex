@@ -6,10 +6,10 @@ defmodule IecWeb.ProvinceLive do
 
   alias Iec.{Parties, Results}
   alias Iec.Results.Change
-  alias IecWeb.{ChangeDigest, Narrative, TableRows}
+  alias IecWeb.{ChangeDigest, LiveUpdates, Narrative, TableRows}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results, :parties]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results, :parties]}
 
   @impl Phoenix.LiveView
   def mount(%{"id" => id}, _session, socket) do
@@ -23,13 +23,9 @@ defmodule IecWeb.ProvinceLive do
      |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
-
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(assigns), do: {__MODULE__, assigns.province_id}
+  @impl LiveUpdates
+  def refresh(socket),
+    do: LiveUpdates.assign_cached(socket, {__MODULE__, socket.assigns.province_id}, &load/1)
 
   defp load(%{province_id: nil}), do: %{page_title: "Province", province: nil}
 
@@ -59,7 +55,7 @@ defmodule IecWeb.ProvinceLive do
 
     party_rows = TableRows.party_rows(province, previous_province, parties)
 
-    Map.new(
+    %{
       page_title: (province && province.area_name) || "Province",
       province: province,
       previous_province: previous_province,
@@ -72,60 +68,44 @@ defmodule IecWeb.ProvinceLive do
         |> Enum.map(&Change.compare/1)
         |> ChangeDigest.highlights()
         |> Enum.take(8)
-    )
+    }
   end
 
   @impl Phoenix.LiveView
+  def render(%{province: nil} = assigns) do
+    ~H"""
+    <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
+      <.not_found eyebrow="Province" title="No results">
+        No results for this province yet, or no province has this id.
+      </.not_found>
+    </Layouts.app>
+    """
+  end
+
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <.page_header :if={is_nil(@province)} eyebrow="Province" title="No results">
-        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
-        <:lede>No results for this province yet, or no province has this id.</:lede>
-      </.page_header>
-
       <.page_header
-        :if={@province}
         eyebrow={@summary && @summary.eyebrow}
         live={@summary != nil and @summary.live}
         title={@province.area_name}
+        crumbs={[{"Overview", ~p"/"}]}
       >
-        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
         <:lede :if={@summary}>{@summary.headline}. {@summary.lede}</:lede>
       </.page_header>
 
-      <section :if={@province} class="panel space-y-8 p-5 sm:p-7">
+      <section class="panel space-y-8 p-5 sm:p-7">
         <.vote_share_bar rows={@party_rows} parties={@parties} previous_year={@previous_year} />
         <div class="grid grid-cols-2 gap-6 border-t border-base-300 pt-6 lg:grid-cols-4">
-          <.kpi
-            label="Districts counted"
-            value={
-              format_progress(
-                @province.voting_districts_complete,
-                @province.voting_districts_expected
-              )
-            }
-          >
-            {format_number(@province.voting_districts_complete)} of {format_number(
-              @province.voting_districts_expected
-            )}
-          </.kpi>
-          <.kpi label="Votes counted" value={format_compact(@province.total_votes_cast)}>
-            {format_compact(@previous_province && @previous_province.total_votes_cast)} in all of {@previous_year}
-          </.kpi>
-          <.kpi
-            label="Councils decided"
-            value={"#{@province.municipalities_complete} / #{@province.municipalities_expected}"}
-          >
-            {@province.majority_councils} with a majority
-          </.kpi>
-          <.kpi label="Hung councils" value={format_number(@province.hung_councils)}>
-            no party over half the seats
-          </.kpi>
+          <.count_kpis snapshot={@province}>
+            <:votes_note>
+              {format_compact(@previous_province && @previous_province.total_votes_cast)} in all of {@previous_year}
+            </:votes_note>
+          </.count_kpis>
         </div>
       </section>
 
-      <section :if={@province} class="space-y-4">
+      <section class="space-y-4">
         <.section_heading title="Who leads where">
           <:subtitle>Each municipality in its leading party's colour</:subtitle>
           <:actions>
@@ -147,7 +127,7 @@ defmodule IecWeb.ProvinceLive do
         />
       </section>
 
-      <section :if={@province} class="space-y-4">
+      <section class="space-y-4">
         <.section_heading title="Municipalities">
           <:subtitle>Who runs each council, who leads, and who led in {@previous_year}</:subtitle>
         </.section_heading>
@@ -165,19 +145,9 @@ defmodule IecWeb.ProvinceLive do
         </div>
       </section>
 
-      <section :if={@province} class="space-y-4">
-        <.section_heading title="Highlights">
-          <:subtitle>Leads changing hands and councils decided in {@province.area_name}</:subtitle>
-        </.section_heading>
-        <p :if={@highlights == []} class="text-sm text-base-content/60">
-          No lead has changed hands here since start-up.
-        </p>
-        <ul :if={@highlights != []} class="panel divide-y divide-base-300">
-          <.highlight :for={event <- @highlights} event={event} parties={@parties} />
-        </ul>
-      </section>
+      <.highlights highlights={@highlights} parties={@parties} area={@province.area_name} />
 
-      <section :if={@province} class="space-y-4">
+      <section class="space-y-4">
         <.section_heading title="All parties" />
         <div class="panel p-2 sm:p-4">
           <.party_table

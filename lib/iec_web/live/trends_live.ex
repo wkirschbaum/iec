@@ -6,29 +6,24 @@ defmodule IecWeb.TrendsLive do
   import IecWeb.ChartComponents
 
   alias Iec.Results
-  alias IecWeb.Trends
+  alias IecWeb.{LiveUpdates, Trends}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results]}
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     {:ok, socket |> assign(page_title: "Trends", live_year: Results.live_year()) |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
+  @impl LiveUpdates
+  def refresh(socket), do: LiveUpdates.assign_cached(socket, {__MODULE__}, &load/1)
 
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(_assigns), do: {__MODULE__}
-
-  defp load(assigns) do
-    %{parties: parties, live_year: live_year} = assigns
+  defp load(%{parties: parties, live_year: live_year}) do
     national = Results.list_snapshots_by_election(:national, 0)
     share = Trends.series(national, :vote_percentage, parties, threshold: 2.5)
-    counting = counting?(national, live_year)
+    {_year, live_national} = List.keyfind(national, live_year, 0, {live_year, nil})
+    counting = counting?(live_national)
     province_names = Results.list_area_names(:province)
 
     provinces =
@@ -42,27 +37,21 @@ defmodule IecWeb.TrendsLive do
       end
       |> Enum.sort_by(& &1.name)
 
-    totals = Trends.totals(national)
-
-    Map.new(
+    %{
       counting: counting,
       share: share,
       seats: Trends.series(national, :total_seats_won, parties, threshold: 100, limit: 6),
       majorities: Trends.series(national, :majority_won, parties, threshold: 1, limit: 5),
-      totals: totals,
-      totals_max:
-        totals |> Enum.map(&max(&1.registered || 0, &1.votes_cast || 0)) |> Enum.max(fn -> 1 end),
+      # The live election's figures are running totals while it is counted.
+      totals:
+        Enum.map(
+          Trends.totals(national),
+          &Map.put(&1, :running, counting and &1.year == live_year)
+        ),
       provinces: provinces,
       first_year: List.first(share.years),
       summary: Trends.summary(share, live_year, not counting)
-    )
-  end
-
-  defp counting?(snapshots_by_year, live_year) do
-    case List.keyfind(snapshots_by_year, live_year, 0) do
-      {_year, snapshot} -> snapshot.voting_districts_complete < snapshot.voting_districts_expected
-      nil -> false
-    end
+    }
   end
 
   @impl Phoenix.LiveView
@@ -132,7 +121,7 @@ defmodule IecWeb.TrendsLive do
           <div :for={row <- @totals} class="grid grid-cols-[3rem_1fr] items-center gap-3">
             <span class={[
               "text-sm tabular-nums",
-              row.year == @live_year && @counting && "font-medium text-primary"
+              row.running && "font-medium text-primary"
             ]}>
               {row.year}
             </span>
@@ -140,7 +129,7 @@ defmodule IecWeb.TrendsLive do
               <div class="flex items-center gap-2">
                 <div
                   class="h-2.5 rounded-full bg-base-content/25 transition-[width] duration-1000"
-                  style={"width: #{(row.registered || 0) / @totals_max * 100}%"}
+                  style={"width: #{row.registered_width}%"}
                 />
                 <span class="text-xs tabular-nums text-base-content/60">
                   {format_compact(row.registered)} registered
@@ -149,11 +138,10 @@ defmodule IecWeb.TrendsLive do
               <div class="flex items-center gap-2">
                 <div
                   class="h-2.5 rounded-full bg-primary transition-[width] duration-1000"
-                  style={"width: #{(row.votes_cast || 0) / @totals_max * 100}%"}
+                  style={"width: #{row.votes_cast_width}%"}
                 />
                 <span class="text-xs tabular-nums text-base-content/60">
-                  {format_compact(row.votes_cast)} ballots{if row.year == @live_year && @counting,
-                    do: " so far"}
+                  {format_compact(row.votes_cast)} ballots{if row.running, do: " so far"}
                 </span>
               </div>
             </div>
@@ -166,11 +154,7 @@ defmodule IecWeb.TrendsLive do
           <:subtitle>Share of the vote of each province's biggest parties</:subtitle>
         </.section_heading>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <.link
-            :for={province <- @provinces}
-            navigate={~p"/provinces/#{province.id}"}
-            class="panel group block space-y-3 p-5 transition-all hover:-translate-y-0.5 hover:shadow-lg"
-          >
+          <.link_card :for={province <- @provinces} navigate={~p"/provinces/#{province.id}"}>
             <div class="flex items-center justify-between">
               <h3 class="text-lg font-medium">{province.name}</h3>
               <.icon
@@ -191,7 +175,7 @@ defmodule IecWeb.TrendsLive do
                 {line.label}
               </span>
             </div>
-          </.link>
+          </.link_card>
         </div>
       </section>
     </Layouts.app>

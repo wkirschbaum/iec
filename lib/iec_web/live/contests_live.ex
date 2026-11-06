@@ -9,10 +9,10 @@ defmodule IecWeb.ContestsLive do
   import IecWeb.DesignComponents
 
   alias Iec.{Contests, Results}
-  alias IecWeb.{Narrative, TableRows}
+  alias IecWeb.{LiveUpdates, Narrative, TableRows, WardNames}
 
-  @behaviour IecWeb.LiveUpdates
-  on_mount {IecWeb.LiveUpdates, [:results, :parties]}
+  @behaviour LiveUpdates
+  on_mount {LiveUpdates, [:results, :parties]}
 
   # A contest this close (in points) counts as close.
   @within 5
@@ -39,44 +39,24 @@ defmodule IecWeb.ContestsLive do
      |> refresh()}
   end
 
-  @impl IecWeb.LiveUpdates
-  def refresh(socket) do
-    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
-  end
+  @impl LiveUpdates
+  def refresh(socket), do: LiveUpdates.assign_cached(socket, {__MODULE__}, &load/1)
 
-  # Computed once per data change and shared by everyone viewing the same page.
-  defp cache_key(_assigns), do: {__MODULE__}
-
-  defp load(assigns) do
-    parties = assigns.parties
+  defp load(%{parties: parties}) do
     councils = TableRows.council_contest_rows(Contests.list_council_contests(), parties)
     wards = TableRows.ward_contest_rows(Contests.list_ward_contests(), parties)
     settled = Enum.filter(councils, &(&1.complete or &1.counted >= @minimum_counted))
     counts = %{councils: count_within(councils), wards: count_within(wards)}
-    closest_council = List.first(settled)
-    closest_ward = List.first(wards)
 
-    Map.new(
+    %{
       council_rows: councils,
       ward_rows: wards,
       knife_edge: Enum.take(settled, @cards),
-      summary: Narrative.close_contests(closest_council, counts, @within),
-      stats: %{
-        councils_within: counts.councils,
-        councils: length(councils),
-        wards_within: counts.wards,
-        wards: length(wards),
-        closest_council_margin: format_points(closest_council && closest_council.margin),
-        closest_council_name: closest_council && closest_council.name,
-        closest_council_path:
-          closest_council && ~p"/municipalities/#{closest_council.municipality_id}",
-        closest_ward_margin: format_points(closest_ward && closest_ward.margin),
-        closest_ward_name:
-          closest_ward &&
-            "#{closest_ward.municipality_name} · #{IecWeb.WardNames.label(closest_ward.ward_id, closest_ward.ward_number)}",
-        closest_ward_path: closest_ward && ~p"/wards/#{closest_ward.ward_id}"
-      }
-    )
+      summary: Narrative.close_contests(List.first(settled), counts, @within),
+      counts: counts,
+      closest_council: List.first(settled),
+      closest_ward: List.first(wards)
+    }
   end
 
   defp count_within(rows), do: Enum.count(rows, &(&1.margin < @within))
@@ -89,21 +69,15 @@ defmodule IecWeb.ContestsLive do
   # Anything else (a stale or crafted event) changes nothing.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
-  # A table's rows in the chosen order, as many as it shows.
-  defp table_view(rows, sort, shown) do
-    visible = rows |> sort_rows(sort) |> Enum.take(shown)
-    %{rows: visible, shown: length(visible), total: length(rows)}
-  end
-
   @impl Phoenix.LiveView
   def render(assigns) do
     %{sorts: sorts, shown: shown} = assigns
 
     assigns =
       assign(assigns,
-        council_table:
-          table_view(assigns.council_rows, sorts["council-contests"], shown["council-contests"]),
-        ward_table: table_view(assigns.ward_rows, sorts["ward-contests"], shown["ward-contests"])
+        council_page:
+          sorted_page(assigns.council_rows, sorts["council-contests"], shown["council-contests"]),
+        ward_page: sorted_page(assigns.ward_rows, sorts["ward-contests"], shown["ward-contests"])
       )
 
     ~H"""
@@ -125,20 +99,30 @@ defmodule IecWeb.ContestsLive do
         id="contest-stats"
         class="panel grid grid-cols-2 gap-x-6 gap-y-7 p-5 sm:p-7 lg:grid-cols-4"
       >
-        <.kpi label={"Councils within #{@within} pts"} value={format_number(@stats.councils_within)}>
-          of {format_number(@stats.councils)} with two parties on the board
+        <.kpi label={"Councils within #{@within} pts"} value={format_number(@counts.councils)}>
+          of {format_number(length(@council_rows))} with two parties on the board
         </.kpi>
-        <.kpi label={"Wards within #{@within} pts"} value={format_number(@stats.wards_within)}>
-          of {format_number(@stats.wards)} contested
+        <.kpi label={"Wards within #{@within} pts"} value={format_number(@counts.wards)}>
+          of {format_number(length(@ward_rows))} contested
         </.kpi>
-        <.kpi label="Closest council" value={@stats.closest_council_margin}>
-          <.link :if={@stats.closest_council_path} navigate={@stats.closest_council_path} class="link">
-            {@stats.closest_council_name}
+        <.kpi
+          label="Closest council"
+          value={format_points(@closest_council && @closest_council.margin)}
+        >
+          <.link
+            :if={@closest_council}
+            navigate={~p"/municipalities/#{@closest_council.municipality_id}"}
+            class="link"
+          >
+            {@closest_council.name}
           </.link>
         </.kpi>
-        <.kpi label="Closest ward" value={@stats.closest_ward_margin}>
-          <.link :if={@stats.closest_ward_path} navigate={@stats.closest_ward_path} class="link">
-            {@stats.closest_ward_name}
+        <.kpi label="Closest ward" value={format_points(@closest_ward && @closest_ward.margin)}>
+          <.link :if={@closest_ward} navigate={~p"/wards/#{@closest_ward.ward_id}"} class="link">
+            {@closest_ward.municipality_name} · {WardNames.label(
+              @closest_ward.ward_id,
+              @closest_ward.ward_number
+            )}
           </.link>
         </.kpi>
       </section>
@@ -166,90 +150,13 @@ defmodule IecWeb.ContestsLive do
             compares with {@previous_year}
           </:subtitle>
         </.section_heading>
-        <p :if={@council_table.total == 0} class="text-sm opacity-60">No council results yet.</p>
-        <div :if={@council_table.total > 0} class="panel overflow-x-auto p-2 sm:p-4">
-          <table id="council-contests" class="table table-sm">
-            <thead>
-              <tr>
-                <.sort_header table="council-contests" column="name" sorts={@sorts} first="asc">
-                  Municipality
-                </.sort_header>
-                <.sort_header table="council-contests" column="leader" sorts={@sorts} first="asc">
-                  Leader
-                </.sort_header>
-                <.sort_header table="council-contests" column="runner_up" sorts={@sorts} first="asc">
-                  Runner-up
-                </.sort_header>
-                <.sort_header
-                  table="council-contests"
-                  column="margin"
-                  sorts={@sorts}
-                  first="asc"
-                  align="right"
-                >
-                  Lead
-                </.sort_header>
-                <.sort_header
-                  table="council-contests"
-                  column="margin_votes"
-                  sorts={@sorts}
-                  first="asc"
-                  align="right"
-                >
-                  Votes apart
-                </.sort_header>
-                <.sort_header
-                  table="council-contests"
-                  column="previous_margin"
-                  sorts={@sorts}
-                  first="asc"
-                  align="right"
-                >
-                  {@previous_year}
-                </.sort_header>
-                <.sort_header
-                  table="council-contests"
-                  column="margin_change"
-                  sorts={@sorts}
-                  first="asc"
-                  align="right"
-                >
-                  Change
-                </.sort_header>
-                <.sort_header table="council-contests" column="counted" sorts={@sorts} align="right">
-                  Counted
-                </.sort_header>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={row <- @council_table.rows} id={"council-contests-#{row.municipality_id}"}>
-                <td>
-                  <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
-                    {row.name}
-                  </.link>
-                </td>
-                <td>
-                  <.party_label parties={@parties} party_result={%{party_id: row.leader_id}} />
-                </td>
-                <td>
-                  <.party_label parties={@parties} party_result={%{party_id: row.runner_up_id}} />
-                </td>
-                <td class="text-right font-medium tabular-nums">{format_points(row.margin)}</td>
-                <td class="text-right tabular-nums">{format_number(row.margin_votes)}</td>
-                <td class="text-right tabular-nums opacity-60" title={row.previous_leader}>
-                  {format_points(row.previous_margin)}
-                </td>
-                <td class="text-right tabular-nums opacity-80">
-                  {format_delta(row.margin_change, :points)}
-                </td>
-                <td class="text-right tabular-nums opacity-75">{format_progress(row.counted)}</td>
-              </tr>
-            </tbody>
-          </table>
-          <.show_more
-            table="council-contests"
-            shown={@council_table.shown}
-            total={@council_table.total}
+        <.empty :if={@council_page.total == 0}>No council results yet.</.empty>
+        <div :if={@council_page.total > 0} class="panel p-2 sm:p-4">
+          <.council_table
+            page={@council_page}
+            parties={@parties}
+            previous_year={@previous_year}
+            sorts={@sorts}
           />
         </div>
       </section>
@@ -262,73 +169,116 @@ defmodule IecWeb.ContestsLive do
             left out
           </:subtitle>
         </.section_heading>
-        <p :if={@ward_table.total == 0} class="text-sm opacity-60">No ward results yet.</p>
-        <div :if={@ward_table.total > 0} class="panel overflow-x-auto p-2 sm:p-4">
-          <table id="ward-contests" class="table table-sm">
-            <thead>
-              <tr>
-                <.sort_header table="ward-contests" column="ward" sorts={@sorts} first="asc">
-                  Ward
-                </.sort_header>
-                <.sort_header table="ward-contests" column="leader" sorts={@sorts} first="asc">
-                  Leader
-                </.sort_header>
-                <.sort_header table="ward-contests" column="leader_share" sorts={@sorts} align="right">
-                  Leader share
-                </.sort_header>
-                <.sort_header table="ward-contests" column="runner_up" sorts={@sorts} first="asc">
-                  Runner-up
-                </.sort_header>
-                <.sort_header
-                  table="ward-contests"
-                  column="runner_up_share"
-                  sorts={@sorts}
-                  align="right"
-                >
-                  Runner-up share
-                </.sort_header>
-                <.sort_header
-                  table="ward-contests"
-                  column="margin"
-                  sorts={@sorts}
-                  first="asc"
-                  align="right"
-                >
-                  Lead
-                </.sort_header>
-                <.sort_header table="ward-contests" column="status" sorts={@sorts} first="asc">
-                  Status
-                </.sort_header>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={row <- @ward_table.rows} id={"ward-contests-#{row.ward_id}"}>
-                <td>
-                  <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
-                    {if row.municipality_name, do: "#{row.municipality_name} · "}<.ward_label
-                      number={row.ward_number}
-                      name={row.ward_name}
-                    />
-                  </.link>
-                  <span :if={row.redrawn} class="badge badge-ghost badge-xs">redrawn</span>
-                </td>
-                <td>
-                  <.party_label parties={@parties} party_result={%{party_id: row.leader_id}} />
-                </td>
-                <td class="text-right tabular-nums">{format_percentage(row.leader_share)}</td>
-                <td>
-                  <.party_label parties={@parties} party_result={%{party_id: row.runner_up_id}} />
-                </td>
-                <td class="text-right tabular-nums">{format_percentage(row.runner_up_share)}</td>
-                <td class="text-right font-medium tabular-nums">{format_points(row.margin)}</td>
-                <td class="opacity-75">{row.status}</td>
-              </tr>
-            </tbody>
-          </table>
-          <.show_more table="ward-contests" shown={@ward_table.shown} total={@ward_table.total} />
+        <.empty :if={@ward_page.total == 0}>No ward results yet.</.empty>
+        <div :if={@ward_page.total > 0} class="panel p-2 sm:p-4">
+          <.ward_table page={@ward_page} parties={@parties} sorts={@sorts} />
         </div>
       </section>
     </Layouts.app>
+    """
+  end
+
+  attr :page, :map, required: true, doc: "from IecWeb.Sorting.sorted_page/3"
+  attr :parties, :map, required: true
+  attr :previous_year, :integer, required: true
+  attr :sorts, :map, required: true
+
+  defp council_table(assigns) do
+    ~H"""
+    <.sortable_table
+      id="council-contests"
+      rows={@page.rows}
+      sorts={@sorts}
+      sorted
+      row_id={&"council-contests-#{&1.municipality_id}"}
+    >
+      <:column :let={row} label="Municipality" field="name" first="asc">
+        <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
+          {row.name}
+        </.link>
+      </:column>
+      <:column :let={row} label="Leader" field="leader" first="asc">
+        <.party_label parties={@parties} party_result={%{party_id: row.leader_id}} />
+      </:column>
+      <:column :let={row} label="Runner-up" field="runner_up" first="asc">
+        <.party_label parties={@parties} party_result={%{party_id: row.runner_up_id}} />
+      </:column>
+      <:column :let={row} label="Lead" field="margin" first="asc" align="right" class="font-medium">
+        {format_points(row.margin)}
+      </:column>
+      <:column :let={row} label="Votes apart" field="margin_votes" first="asc" align="right">
+        {format_number(row.margin_votes)}
+      </:column>
+      <:column
+        :let={row}
+        label={"#{@previous_year}"}
+        field="previous_margin"
+        first="asc"
+        align="right"
+        class="opacity-60"
+      >
+        <span title={row.previous_leader}>{format_points(row.previous_margin)}</span>
+      </:column>
+      <:column
+        :let={row}
+        label="Change"
+        field="margin_change"
+        first="asc"
+        align="right"
+        class="opacity-80"
+      >
+        {format_delta(row.margin_change, :points)}
+      </:column>
+      <:column :let={row} label="Counted" field="counted" align="right" class="opacity-75">
+        {format_progress(row.counted)}
+      </:column>
+      <.show_more table="council-contests" shown={@page.shown} total={@page.total} />
+    </.sortable_table>
+    """
+  end
+
+  attr :page, :map, required: true, doc: "from IecWeb.Sorting.sorted_page/3"
+  attr :parties, :map, required: true
+  attr :sorts, :map, required: true
+
+  defp ward_table(assigns) do
+    ~H"""
+    <.sortable_table
+      id="ward-contests"
+      rows={@page.rows}
+      sorts={@sorts}
+      sorted
+      row_id={&"ward-contests-#{&1.ward_id}"}
+    >
+      <:column :let={row} label="Ward" field="ward" first="asc">
+        <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
+          {if row.municipality_name, do: "#{row.municipality_name} · "}<.ward_label
+            number={row.ward_number}
+            name={row.ward_name}
+          />
+        </.link>
+        <span :if={row.redrawn} class="badge badge-ghost badge-xs">redrawn</span>
+      </:column>
+      <:column :let={row} label="Leader" field="leader" first="asc">
+        <.party_label parties={@parties} party_result={%{party_id: row.leader_id}} />
+      </:column>
+      <:column :let={row} label="Leader share" field="leader_share" align="right">
+        {format_percentage(row.leader_share)}
+      </:column>
+      <:column :let={row} label="Runner-up" field="runner_up" first="asc">
+        <.party_label parties={@parties} party_result={%{party_id: row.runner_up_id}} />
+      </:column>
+      <:column :let={row} label="Runner-up share" field="runner_up_share" align="right">
+        {format_percentage(row.runner_up_share)}
+      </:column>
+      <:column :let={row} label="Lead" field="margin" first="asc" align="right" class="font-medium">
+        {format_points(row.margin)}
+      </:column>
+      <:column :let={row} label="Status" field="status" first="asc" class="opacity-75">
+        {row.status}
+      </:column>
+      <.show_more table="ward-contests" shown={@page.shown} total={@page.total} />
+    </.sortable_table>
     """
   end
 
@@ -338,10 +288,10 @@ defmodule IecWeb.ContestsLive do
   # One close council: the two leading parties as a tug-of-war bar, and the gap.
   defp contest_card(assigns) do
     ~H"""
-    <.link
+    <.link_card
       navigate={~p"/municipalities/#{@contest.municipality_id}"}
       id={"knife-edge-#{@contest.municipality_id}"}
-      class="panel group block space-y-3 p-4 transition hover:-translate-y-0.5"
+      class="block space-y-3 p-4"
     >
       <div class="flex items-baseline justify-between gap-3">
         <h3 class="truncate font-medium group-hover:underline">{@contest.name}</h3>
@@ -364,7 +314,7 @@ defmodule IecWeb.ContestsLive do
       <p class="text-xs tabular-nums text-base-content/60">
         {format_number(@contest.margin_votes)} votes apart · {format_progress(@contest.counted)} counted
       </p>
-    </.link>
+    </.link_card>
     """
   end
 end
