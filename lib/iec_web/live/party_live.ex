@@ -475,7 +475,10 @@ defmodule IecWeb.PartyLive do
                   {row.municipality_name}
                 </.link>
                 <span :if={is_nil(row.municipality_id)}>{row.municipality_name}</span>
-                · ward {row.ward_number}
+                ·
+                <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
+                  ward {row.ward_number}
+                </.link>
                 <span :if={row.new_ward} class="badge badge-ghost badge-sm">
                   {if row.redrawn, do: "redrawn", else: "new ward"}
                 </span>

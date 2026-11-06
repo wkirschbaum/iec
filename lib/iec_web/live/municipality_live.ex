@@ -3,10 +3,15 @@ defmodule IecWeb.MunicipalityLive do
 
   import IecWeb.ResultsComponents
   import IecWeb.DesignComponents
+  import IecWeb.ChartComponents
 
-  alias Iec.{Parties, Results}
+  alias Iec.{Contests, Maps, Parties, Results}
   alias Iec.Results.Change
-  alias IecWeb.{Narrative, TableRows}
+  alias IecWeb.{Narrative, TableRows, Trends}
+
+  # Parties shown at first, and how many more each "Show more" adds.
+  @page_size 10
+  @more 25
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
@@ -16,11 +21,23 @@ defmodule IecWeb.MunicipalityLive do
     {:ok,
      socket
      |> assign(
-       municipality_id: String.to_integer(id),
+       municipality_id: parse_id(id),
+       parties_shown: @page_size,
        live_year: Results.live_year(),
        previous_year: Results.previous_year()
      )
      |> refresh()}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("show_more", %{"table" => "municipality-parties"}, socket),
+    do: {:noreply, update(socket, :parties_shown, &(&1 + @more))}
+
+  defp parse_id(id) do
+    case Integer.parse(id) do
+      {municipality_id, ""} -> municipality_id
+      _not_an_id -> nil
+    end
   end
 
   @impl IecWeb.LiveUpdates
@@ -30,6 +47,8 @@ defmodule IecWeb.MunicipalityLive do
 
   # Computed once per data change and shared by everyone viewing the same page.
   defp cache_key(assigns), do: {__MODULE__, assigns.municipality_id}
+
+  defp load(%{municipality_id: nil}), do: %{page_title: "Municipality", municipality: nil}
 
   defp load(assigns) do
     %{
@@ -58,8 +77,28 @@ defmodule IecWeb.MunicipalityLive do
       |> TableRows.with_party_name(parties, :holder, :holder_name)
       |> TableRows.with_party_name(parties, :previous_holder, :previous_holder_name)
 
+    ward_ids = Enum.map(ward_rows, & &1.ward_id)
+    history = Results.list_snapshots_by_election(:municipality, municipality_id)
+
+    closest_wards =
+      Contests.list_ward_leads(live_year, ward_ids)
+      |> Enum.filter(fn {_ward_id, lead} ->
+        lead.margin != nil and (lead.declared or lead.margin > 0)
+      end)
+      |> Enum.sort_by(fn {_ward_id, lead} -> lead.margin end)
+      |> Enum.take(6)
+      |> Enum.map(fn {ward_id, lead} ->
+        Map.merge(lead, %{ward_id: ward_id, ward_number: Iec.Results.Ward.ward_number(ward_id)})
+      end)
+
     Map.new(
       page_title: (municipality && municipality.area_name) || "Municipality",
+      trend: Trends.series(history, :vote_percentage, parties, limit: 5),
+      counting: municipality != nil and municipality.municipalities_complete != 1,
+      ward_results: Maps.list_area_results(:ward, ward_ids),
+      ward_tally: ward_tally(ward_rows, parties),
+      closest_wards: closest_wards,
+      flipped_wards: Enum.filter(ward_rows, & &1.changed_hands),
       municipality: municipality,
       complete: municipality != nil and municipality.municipalities_complete == 1,
       province_name: municipality && Results.get_area_name(:province, municipality.province_id),
@@ -76,6 +115,28 @@ defmodule IecWeb.MunicipalityLive do
         Results.list_changes(level: :municipality, area_id: municipality_id, changed_only: true)
         |> Enum.map(&Change.compare/1)
     )
+  end
+
+  # Wards won per party now and in the previous election, most first. The previous count
+  # covers today's wards that existed then.
+  defp ward_tally(ward_rows, parties) do
+    now = Enum.frequencies_by(Enum.filter(ward_rows, & &1.holder), & &1.holder)
+
+    before =
+      Enum.frequencies_by(Enum.filter(ward_rows, & &1.previous_holder), & &1.previous_holder)
+
+    (Map.keys(now) ++ Map.keys(before))
+    |> Enum.uniq()
+    |> Enum.map(fn party_id ->
+      %{
+        party_id: party_id,
+        wards: Map.get(now, party_id, 0),
+        previous_wards: Map.get(before, party_id, 0),
+        change: Map.get(now, party_id, 0) - Map.get(before, party_id, 0)
+      }
+    end)
+    |> Enum.sort_by(&{-&1.wards, -&1.previous_wards})
+    |> TableRows.with_party_name(parties, :party_id, :party)
   end
 
   @impl Phoenix.LiveView
@@ -135,6 +196,198 @@ defmodule IecWeb.MunicipalityLive do
               </div>
             </div>
           </div>
+          <div
+            id="municipality-ballots"
+            class="grid grid-cols-2 gap-6 border-t border-base-300 pt-6 lg:grid-cols-4"
+          >
+            <.kpi label="Registered voters" value={format_compact(@municipality.registered_voters)}>
+              <span :if={@previous_municipality}>
+                {format_compact(@previous_municipality.registered_voters)} in {@previous_year}
+              </span>
+            </.kpi>
+            <.kpi
+              label={if @complete, do: "Ballots cast", else: "Ballots so far"}
+              value={format_compact(@municipality.total_votes_cast)}
+            >
+              <span :if={@previous_municipality}>
+                {format_compact(@previous_municipality.total_votes_cast)} in {@previous_year}
+              </span>
+            </.kpi>
+            <.kpi
+              label="Spoilt"
+              value={format_share(@municipality.spoilt_votes, @municipality.total_votes_cast)}
+            >
+              <span :if={@previous_municipality}>
+                {format_share(
+                  @previous_municipality.spoilt_votes,
+                  @previous_municipality.total_votes_cast
+                )} in {@previous_year}
+              </span>
+            </.kpi>
+            <.kpi
+              label="Seats declared"
+              value={format_number(@municipality.seats_complete)}
+            >
+              of {format_number(@municipality.seats_expected)}
+            </.kpi>
+          </div>
+        </section>
+
+        <section class="grid gap-6 lg:grid-cols-5">
+          <div :if={length(@trend.years) > 1} class="space-y-3 lg:col-span-3">
+            <.section_heading title={"Since #{List.first(@trend.years)}"}>
+              <:subtitle>
+                Share of the vote in every local election (the IEC lists each council's top
+                three){if @counting, do: "; #{@live_year} is dashed while its count runs"}
+              </:subtitle>
+            </.section_heading>
+            <div class="panel p-5 sm:p-6">
+              <.line_chart
+                id="municipality-trend"
+                trend={@trend}
+                live_year={@live_year}
+                counting={@counting}
+              />
+            </div>
+          </div>
+          <div :if={@ward_tally != []} class="space-y-3 lg:col-span-2">
+            <.section_heading title="Wards won">
+              <:subtitle>The declared wards, against who won them in {@previous_year}</:subtitle>
+            </.section_heading>
+            <ul id="municipality-ward-tally" class="panel space-y-3 p-5 sm:p-6">
+              <li :for={row <- Enum.take(@ward_tally, 6)} id={"ward-tally-#{row.party_id}"}>
+                <.link navigate={~p"/parties/#{row.party_id}"} class="group block space-y-1.5">
+                  <span class="flex items-baseline justify-between gap-3 text-sm">
+                    <span class="inline-flex items-center gap-2 font-medium group-hover:underline">
+                      <span
+                        class="size-2.5 rounded-full"
+                        style={"background-color: #{party_colour(@parties, row)}"}
+                      />
+                      {row.party}
+                    </span>
+                    <span class="tabular-nums">
+                      <span class="font-medium">{row.wards}</span>
+                      <span class={["ml-1 text-xs", delta_class(row.change)]}>
+                        {format_delta(row.change, :count)}
+                      </span>
+                    </span>
+                  </span>
+                  <span class="relative block h-2 overflow-hidden rounded-full bg-base-200">
+                    <span
+                      class="absolute inset-y-0 left-0 rounded-full opacity-30"
+                      style={"width: #{row.previous_wards / max(length(@ward_rows), 1) * 100}%; background-color: #{party_colour(@parties, row)}"}
+                    />
+                    <span
+                      class="absolute inset-y-0 left-0 rounded-full transition-[width] duration-1000"
+                      style={"width: #{row.wards / max(length(@ward_rows), 1) * 100}%; background-color: #{party_colour(@parties, row)}"}
+                    />
+                  </span>
+                </.link>
+              </li>
+              <li class="pt-1 text-xs text-base-content/55">
+                Faint bar: {@previous_year}. {@wards_declared} of {length(@ward_rows)} wards declared.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section :if={@ward_rows != []} id="municipality-ward-picker" class="space-y-3">
+          <.section_heading title="Pick a ward">
+            <:subtitle>Each in its leader's colour; a hollow dot is still counting</:subtitle>
+            <:actions>
+              <.link navigate={~p"/wards"} class="link-hover link">Search all wards →</.link>
+            </:actions>
+          </.section_heading>
+          <ul class="grid grid-cols-[repeat(auto-fill,minmax(4rem,1fr))] gap-2">
+            <li :for={ward <- Enum.sort_by(@ward_rows, & &1.ward_number)}>
+              <.ward_chip
+                ward_id={ward.ward_id}
+                ward_number={ward.ward_number}
+                result={@ward_results[ward.ward_id]}
+                parties={@parties}
+              />
+            </li>
+          </ul>
+        </section>
+
+        <section
+          :if={@closest_wards != [] or @flipped_wards != []}
+          class="grid gap-6 lg:grid-cols-2"
+        >
+          <div :if={@closest_wards != []} class="space-y-3">
+            <.section_heading title="Closest wards">
+              <:subtitle>Lead of the first party over the second</:subtitle>
+            </.section_heading>
+            <ul class="panel divide-y divide-base-300 overflow-hidden">
+              <li :for={ward <- @closest_wards} id={"closest-ward-#{ward.ward_id}"}>
+                <.link
+                  navigate={~p"/wards/#{ward.ward_id}"}
+                  class="group flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-base-200/70"
+                >
+                  <span class="w-20 shrink-0 whitespace-nowrap font-medium">Ward {ward.ward_number}</span>
+                  <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 text-sm">
+                    <.party_label
+                      parties={@parties}
+                      party_result={%{party_id: ward.leader_id}}
+                      link={false}
+                    />
+                    <span class="text-base-content/50">over</span>
+                    <.party_label
+                      parties={@parties}
+                      party_result={%{party_id: ward.runner_up_id}}
+                      link={false}
+                    />
+                  </span>
+                  <span class="text-right text-sm font-medium tabular-nums">
+                    {format_points(ward.margin)}
+                  </span>
+                  <.icon
+                    name="hero-chevron-right-micro"
+                    class="size-4 text-base-content/30 transition-transform group-hover:translate-x-0.5"
+                  />
+                </.link>
+              </li>
+            </ul>
+          </div>
+          <div :if={@flipped_wards != []} class="space-y-3">
+            <.section_heading title="Changed hands">
+              <:subtitle>
+                {length(@flipped_wards)} wards with a new winner since {@previous_year}
+              </:subtitle>
+            </.section_heading>
+            <ul class="panel divide-y divide-base-300 overflow-hidden">
+              <li :for={ward <- Enum.take(@flipped_wards, 8)} id={"flipped-ward-#{ward.ward_id}"}>
+                <.link
+                  navigate={~p"/wards/#{ward.ward_id}"}
+                  class="group flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-base-200/70"
+                >
+                  <span class="w-20 shrink-0 whitespace-nowrap font-medium">Ward {ward.ward_number}</span>
+                  <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 text-sm">
+                    <.party_label
+                      parties={@parties}
+                      party_result={%{party_id: ward.previous_holder}}
+                      link={false}
+                    />
+                    <span class="text-base-content/50">→</span>
+                    <.party_label
+                      parties={@parties}
+                      party_result={%{party_id: ward.holder}}
+                      link={false}
+                    />
+                  </span>
+                  <.icon
+                    name="hero-chevron-right-micro"
+                    class="size-4 text-base-content/30 transition-transform group-hover:translate-x-0.5"
+                  />
+                </.link>
+              </li>
+              <li :if={length(@flipped_wards) > 8} class="px-4 py-2.5 text-sm">
+                <a href="#municipality-wards" class="link-hover link">
+                  All {length(@flipped_wards)} in the wards table ↓
+                </a>
+              </li>
+            </ul>
+          </div>
         </section>
 
         <section class="space-y-2">
@@ -152,6 +405,7 @@ defmodule IecWeb.MunicipalityLive do
               :if={@from_party_files}
               id="municipality-parties"
               rows={@party_rows}
+              shown={@parties_shown}
               parties={@parties}
               previous_year={@previous_year}
               sorts={@sorts}
@@ -207,14 +461,23 @@ defmodule IecWeb.MunicipalityLive do
     """
   end
 
+  defp format_share(part, whole) when is_integer(part) and is_integer(whole) and whole > 0,
+    do: format_progress(part / whole * 100)
+
+  defp format_share(_part, _whole), do: "–"
+
   attr :id, :string, required: true
   attr :rows, :list, required: true
   attr :parties, :map, required: true
   attr :previous_year, :integer, required: true
+  attr :shown, :integer, required: true
   attr :sorts, :map, required: true
 
   # Every followed party's share and seats in this council, from the party files.
   defp council_party_table(assigns) do
+    visible = assigns.rows |> sort_rows(assigns.sorts[assigns.id]) |> Enum.take(assigns.shown)
+    assigns = assign(assigns, visible: visible, total: length(assigns.rows))
+
     ~H"""
     <div class="overflow-x-auto">
       <table id={@id} class="table table-sm">
@@ -233,7 +496,7 @@ defmodule IecWeb.MunicipalityLive do
           </tr>
         </thead>
         <tbody>
-          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-#{row.party_id}"}>
+          <tr :for={row <- @visible} id={"#{@id}-#{row.party_id}"}>
             <td>
               <.party_label parties={@parties} party_result={row} />
               <span :if={row.majority} class="badge badge-success badge-sm ml-2">majority</span>
@@ -250,6 +513,15 @@ defmodule IecWeb.MunicipalityLive do
           </tr>
         </tbody>
       </table>
+      <button
+        :if={length(@visible) < @total}
+        type="button"
+        class="btn btn-ghost btn-sm mt-2"
+        phx-click="show_more"
+        phx-value-table={@id}
+      >
+        Show more <span class="opacity-60">({length(@visible)} of {@total})</span>
+      </button>
       <p class="mt-2 text-sm opacity-60">
         Parties the app follows (the national list, plus any whose page you opened).
       </p>
@@ -293,7 +565,9 @@ defmodule IecWeb.MunicipalityLive do
             class={ward.changed_hands && "bg-warning/10"}
           >
             <td class="tabular-nums">
-              {ward.ward_number}
+              <.link navigate={~p"/wards/#{ward.ward_id}"} class="link font-medium">
+                {ward.ward_number}
+              </.link>
               <span :if={ward.new_ward} class="badge badge-ghost badge-sm">new</span>
               <span
                 :if={ward.redrawn}

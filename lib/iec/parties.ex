@@ -494,10 +494,6 @@ defmodule Iec.Parties do
       end
       |> Enum.sort_by(&(-(&1.share || 0)))
 
-    %{parties: parties, wards: municipality_wards(municipality_id, live_year, previous_year)}
-  end
-
-  defp municipality_wards(municipality_id, live_year, previous_year) do
     ward_ids =
       Repo.all(
         from ward in Ward,
@@ -506,6 +502,11 @@ defmodule Iec.Parties do
           select: ward.id
       )
 
+    %{parties: parties, wards: ward_winners(ward_ids, live_year, previous_year)}
+  end
+
+  # Each ward's winner now and before, and whether it changed hands.
+  defp ward_winners(ward_ids, live_year, previous_year) do
     holders = ward_holders(ward_ids)
     first_fetched_at = first_party_fetches(live_year)
     redrawn = Maps.list_redrawn_ward_ids()
@@ -539,6 +540,69 @@ defmodule Iec.Parties do
         new_ward: not MapSet.member?(existed, ward_id),
         redrawn: ward_id in redrawn
       }
+    end
+  end
+
+  @doc """
+  One ward now and in the previous election, from the party files, or nil for a ward not
+  in the live ward directory:
+
+    * the ward (`ward_id`, `ward_number`, `municipality_id`) and its winner as on the
+      municipality page (`holder`, `share`, `declared_at`, `previous_holder`,
+      `changed_hands`, `new_ward`, `redrawn`)
+    * `parties` – every followed party's share now and before and its swing, biggest
+      first; `won` and `previous_won` mark the winners. A redrawn ward's previous figures
+      are for its old shape. `council_share` is the party's share of the whole council.
+  """
+  def get_ward_overview(ward_id) do
+    case Repo.get(Ward, ward_id) do
+      nil ->
+        nil
+
+      ward ->
+        live_year = Results.live_year()
+        previous_year = Results.previous_year()
+
+        [summary] = ward_winners([ward.id], live_year, previous_year)
+
+        rows =
+          PartyWardResult
+          |> where([result], result.ward_id == ^ward.id)
+          |> Repo.all()
+          |> Enum.group_by(& &1.election)
+
+        before_by_party = Map.new(rows[previous_year] || [], &{&1.party_id, &1})
+
+        council_shares =
+          Repo.all(
+            from result in PartyMunicipalityResult,
+              where:
+                result.municipality_id == ^ward.municipality_id and
+                  result.election == ^live_year,
+              select: {result.party_id, result.vote_percentage}
+          )
+          |> Map.new()
+
+        # Parties standing elsewhere but with nothing here, now or before, are left out.
+        parties =
+          (rows[live_year] || [])
+          |> Enum.map(fn now ->
+            before = before_by_party[now.party_id]
+
+            %{
+              party_id: now.party_id,
+              share: now.vote_percentage,
+              previous_share: before && before.vote_percentage,
+              swing: swing(now, before),
+              won: now.won,
+              previous_won: before != nil and before.won,
+              council_share: council_shares[now.party_id]
+            }
+          end)
+          |> Enum.filter(&(&1.won or (&1.share || 0) > 0 or (&1.previous_share || 0) > 0))
+          |> Enum.sort_by(&{not &1.won, -(&1.share || 0)})
+
+        Map.merge(summary, %{municipality_id: ward.municipality_id, parties: parties})
     end
   end
 

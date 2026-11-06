@@ -10,7 +10,8 @@ defmodule IecWeb.MapComponent do
         refreshed_at={@refreshed_at}
       />
 
-  Options: `province_id` / `municipality_id` to show one area's children, and `mode`:
+  Options: `province_id` / `municipality_id` to show one area's children, or `area_ids`
+  to show just those areas; `highlight` (an area id) to outline one area; and `mode`:
 
     * `:leader` – the leader's colour, stronger for a bigger share; hatched while
       counting, grey before any results
@@ -65,7 +66,9 @@ defmodule IecWeb.MapComponent do
   def update(assigns, socket) do
     socket = assign(socket, Map.put_new(assigns, :mode, :leader))
     socket = assign(socket, :connected, connected?(socket))
-    shape_key = {socket.assigns.level, assigns[:province_id], assigns[:municipality_id]}
+
+    shape_key =
+      {socket.assigns.level, assigns[:province_id], assigns[:municipality_id], assigns[:area_ids]}
 
     socket =
       if socket.assigns.shape_key == shape_key do
@@ -74,7 +77,8 @@ defmodule IecWeb.MapComponent do
         boundaries =
           Maps.list_boundaries(socket.assigns.level,
             province_id: assigns[:province_id],
-            municipality_id: assigns[:municipality_id]
+            municipality_id: assigns[:municipality_id],
+            area_ids: assigns[:area_ids]
           )
 
         socket
@@ -87,7 +91,9 @@ defmodule IecWeb.MapComponent do
         |> stream(:areas, [], reset: true)
       end
 
-    {:ok, restyle(socket)}
+    highlighted = Enum.find(socket.assigns.boundaries, &(&1.area_id == assigns[:highlight]))
+
+    {:ok, socket |> assign(:highlight_path, highlighted && highlighted.path) |> restyle()}
   end
 
   # Colours every area and streams only those whose look changed since the last render.
@@ -184,7 +190,7 @@ defmodule IecWeb.MapComponent do
   defp overview?(assigns),
     do:
       assigns.level == :ward and is_nil(assigns[:province_id]) and
-        is_nil(assigns[:municipality_id])
+        is_nil(assigns[:municipality_id]) and is_nil(assigns[:area_ids])
 
   defp area_details(boundary, result, mode, parties, overview) do
     title =
@@ -248,8 +254,7 @@ defmodule IecWeb.MapComponent do
   defp area_href(%{level: :province, area_id: id}), do: ~p"/provinces/#{id}"
   defp area_href(%{level: :municipality, area_id: id}), do: ~p"/municipalities/#{id}"
 
-  defp area_href(%{level: :ward, municipality_id: id, area_id: ward_id}),
-    do: ~p"/municipalities/#{id}" <> "#ward-#{ward_id}"
+  defp area_href(%{level: :ward, area_id: id}), do: ~p"/wards/#{id}"
 
   # Legend counts: areas led (or, for flips, won from someone else) per party, or for
   # the figure-based modes, areas per band.
@@ -355,6 +360,20 @@ defmodule IecWeb.MapComponent do
                 data-href={area.href}
               />
             </g>
+            <path
+              :if={@highlight_path}
+              id={"#{@id}-highlight"}
+              d={@highlight_path}
+              fill="none"
+              class="pointer-events-none stroke-base-content [stroke-width:2.5] [vector-effect:non-scaling-stroke]"
+            />
+            <path
+              id={"#{@id}-hover"}
+              fill="none"
+              style="opacity: 0"
+              phx-mounted={JS.ignore_attributes(["d", "style"])}
+              class="pointer-events-none stroke-base-content [stroke-width:1.5] [vector-effect:non-scaling-stroke] transition-opacity duration-150"
+            />
           </g>
         </svg>
 
@@ -421,6 +440,10 @@ defmodule IecWeb.MapComponent do
             }, {passive: false})
 
             this.el.addEventListener("pointerdown", (event) => {
+              // Capturing the pointer sends the click to the svg, not to the area, so the
+              // pressed area is remembered here.
+              this.pressed = event.target.closest && event.target.closest("[data-href]")
+              this.pointerType = event.pointerType
               this.el.setPointerCapture(event.pointerId)
               this.pointers.set(event.pointerId, this.point(event))
               this.moved = 0
@@ -442,20 +465,34 @@ defmodule IecWeb.MapComponent do
 
                 this.moved += Math.hypot(current.x - previous.x, current.y - previous.y)
                 this.pointers.set(event.pointerId, this.point(event))
-                this.tooltip.classList.add("hidden")
+                this.hideTooltip()
                 return
               }
-              this.showTooltip(event)
+              if (event.pointerType !== "touch") this.showTooltip(event.target, event)
             })
 
             const release = (event) => this.pointers.delete(event.pointerId)
             this.el.addEventListener("pointerup", release)
             this.el.addEventListener("pointercancel", release)
-            this.el.addEventListener("pointerleave", () => this.tooltip.classList.add("hidden"))
+            this.el.addEventListener("pointerleave", () => {
+              if (this.pointerType !== "touch") this.hideTooltip()
+            })
 
+            // A click opens the area; a drag never does. On a touch screen the first tap
+            // shows what the area is, and a second tap on it opens it.
             this.el.addEventListener("click", (event) => {
-              const href = event.target.dataset && event.target.dataset.href
-              if (href && this.moved < this.dragThreshold()) this.js().navigate(href)
+              const area = this.pressed
+              this.pressed = null
+              if (this.moved >= this.dragThreshold()) return
+              if (!area) { this.hideTooltip(); return }
+
+              if (this.pointerType === "touch" && this.selected !== area) {
+                this.showTooltip(area, event, "Tap again to open")
+                this.selected = area
+              } else {
+                this.outline(area)
+                this.js().navigate(area.dataset.href)
+              }
             })
 
             this.el.addEventListener("map:zoom", (event) => {
@@ -513,11 +550,33 @@ defmodule IecWeb.MapComponent do
             this.viewport.setAttribute("transform", `translate(${this.x} ${this.y}) scale(${this.scale})`)
           },
 
-          showTooltip(event) {
-            const tip = event.target.dataset && event.target.dataset.tip
-            if (!tip) { this.tooltip.classList.add("hidden"); return }
+          // The hovered or tapped area, outlined above its neighbours.
+          outline(area) {
+            const hover = this.el.querySelector("path[id$='-hover']")
+            if (!hover) return
+            if (area) hover.setAttribute("d", area.getAttribute("d"))
+            hover.style.opacity = area ? 1 : 0
+          },
+
+          hideTooltip() {
+            this.tooltip.classList.add("hidden")
+            this.selected = null
+            this.outline(null)
+          },
+
+          showTooltip(target, event, hint) {
+            const area = target && target.closest && target.closest("[data-tip]")
+            const tip = area && area.dataset.tip
+            if (!tip) { this.hideTooltip(); return }
+            this.outline(area)
             const bounds = this.el.parentElement.getBoundingClientRect()
             this.tooltip.textContent = tip
+            if (hint) {
+              const line = document.createElement("span")
+              line.className = "mt-0.5 block text-xs font-medium text-primary"
+              line.textContent = hint
+              this.tooltip.appendChild(line)
+            }
             this.tooltip.classList.remove("hidden")
             const left = Math.min(event.clientX - bounds.left + 14, bounds.width - this.tooltip.offsetWidth - 4)
             this.tooltip.style.left = `${Math.max(left, 4)}px`

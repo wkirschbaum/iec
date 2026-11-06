@@ -46,6 +46,51 @@ defmodule IecWeb.Trends do
     %{years: years, series: series, max: max, step: step}
   end
 
+  @doc """
+  `%{years, series, max, step}` for two elections from rows with `:party_id`, `:share`
+  and `:previous_share` (a ward's parties): the `limit` parties with the highest share in
+  either. A party standing in one election only is a single dot.
+  """
+  def from_shares(rows, parties, {previous_year, live_year}, limit \\ 5) do
+    series =
+      rows
+      |> Enum.filter(&(&1.party_id >= 0))
+      |> Enum.map(fn row ->
+        points =
+          [{previous_year, row.previous_share}, {live_year, row.share}]
+          |> Enum.filter(fn {_year, share} -> is_number(share) and share > 0 end)
+
+        %{
+          party_id: row.party_id,
+          label: party_abbreviation(parties, row),
+          colour: party_colour(parties, row),
+          points: points,
+          peak: points |> Enum.map(&elem(&1, 1)) |> Enum.max(fn -> 0 end)
+        }
+      end)
+      |> Enum.filter(&(&1.peak > 0))
+      |> Enum.sort_by(&(-&1.peak))
+      |> Enum.take(limit)
+
+    {max, step} = series |> Enum.map(& &1.peak) |> Enum.max(fn -> 0 end) |> nice_scale()
+    %{years: [previous_year, live_year], series: series, max: max, step: step}
+  end
+
+  @doc """
+  Each party's `field` in every election it has a value, oldest first, keyed by party id:
+  `%{party_id => [{year, value}]}`, for sparklines.
+  """
+  def points_by_party(snapshots_by_year, field \\ :vote_percentage) do
+    for {year, snapshot} <- snapshots_by_year,
+        party <- snapshot.party_results,
+        party.party_id >= 0,
+        value = Map.get(party, field),
+        is_number(value),
+        reduce: %{} do
+      points -> Map.update(points, party.party_id, [{year, value}], &(&1 ++ [{year, value}]))
+    end
+  end
+
   @doc "`[%{year, registered, votes_cast}]`, oldest first."
   def totals(snapshots_by_year) do
     for {year, snapshot} <- snapshots_by_year do

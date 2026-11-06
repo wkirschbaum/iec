@@ -136,6 +136,71 @@ defmodule IecWeb.Narrative do
   end
 
   @doc """
+  `%{headline, lede, eyebrow, live}` for a ward (`Iec.Parties.get_ward_overview/1`): who
+  won or leads it and by how much, whether it changed hands, and the runner-up. `lead`
+  is the ward's entry from `Iec.Contests.list_ward_leads/2`. Nil before it has results.
+  """
+  def ward(_ward, nil, _parties, _previous_year), do: nil
+
+  def ward(ward, lead, parties, previous_year) do
+    leader = party_abbreviation(parties, %{party_id: lead.leader_id})
+    verb = if lead.declared, do: "wins", else: "leads"
+
+    %{
+      headline: "#{leader} #{verb} ward #{ward.ward_number} with #{percent(lead.leader_share)}",
+      lede:
+        [
+          ward_runner_up(lead, parties),
+          ward_history(ward, lead, parties, previous_year)
+        ]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join(" "),
+      eyebrow: if(lead.declared, do: "Declared", else: "Live · counting"),
+      live: not lead.declared
+    }
+  end
+
+  defp ward_runner_up(%{runner_up_id: nil}, _parties), do: "No other party has votes yet."
+
+  # Shares count every ballot in the ward; the seat goes by the ward ballot alone.
+  defp ward_runner_up(%{margin: nil} = lead, parties),
+    do:
+      "#{party_abbreviation(parties, %{party_id: lead.leader_id})} won the ward ballot, " <>
+        "though #{party_abbreviation(parties, %{party_id: lead.runner_up_id})} has the " <>
+        "bigger share of all the ward's votes, #{percent(lead.runner_up_share)}."
+
+  defp ward_runner_up(lead, parties),
+    do:
+      "#{party_abbreviation(parties, %{party_id: lead.runner_up_id})} is second with " <>
+        "#{percent(lead.runner_up_share)}, #{points(lead.margin)} behind."
+
+  defp ward_history(%{new_ward: true}, _lead, _parties, previous_year),
+    do: "The ward is new since #{previous_year}."
+
+  defp ward_history(%{redrawn: true}, _lead, _parties, previous_year),
+    do: "Its boundary was redrawn since #{previous_year}, so it does not compare like for like."
+
+  defp ward_history(%{previous_holder: nil}, _lead, _parties, _previous_year), do: nil
+
+  defp ward_history(ward, lead, parties, previous_year) do
+    previous = party_abbreviation(parties, %{party_id: ward.previous_holder})
+
+    cond do
+      ward.previous_holder == lead.leader_id and is_number(ward.previous_share) ->
+        "#{previous} also won it in #{previous_year}, with #{percent(ward.previous_share)}."
+
+      ward.previous_holder == lead.leader_id ->
+        "#{previous} also won it in #{previous_year}."
+
+      lead.declared ->
+        "It takes the ward from #{previous}, which won it in #{previous_year}."
+
+      true ->
+        "#{previous} won it in #{previous_year}."
+    end
+  end
+
+  @doc """
   One or two sentences on the close contests: the narrowest council (`closest`, a council
   contest row, or nil) and how many councils and wards are within `within` points. Nil
   before any council has two parties on the board.

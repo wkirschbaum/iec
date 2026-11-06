@@ -290,14 +290,9 @@ defmodule IecWeb.ContestsLive do
             <tbody>
               <tr :for={row <- @ward_table.rows} id={"ward-contests-#{row.ward_id}"}>
                 <td>
-                  <.link
-                    :if={row.municipality_id}
-                    navigate={~p"/municipalities/#{row.municipality_id}" <> "#ward-#{row.ward_id}"}
-                    class="link"
-                  >
-                    {row.municipality_name} · ward {row.ward_number}
+                  <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
+                    {if row.municipality_name, do: "#{row.municipality_name} · "}ward {row.ward_number}
                   </.link>
-                  <span :if={is_nil(row.municipality_id)}>ward {row.ward_number}</span>
                   <span :if={row.redrawn} class="badge badge-ghost badge-xs">redrawn</span>
                 </td>
                 <td>
@@ -372,7 +367,4 @@ defmodule IecWeb.ContestsLive do
     </button>
     """
   end
-
-  defp format_points(nil), do: "–"
-  defp format_points(points), do: :erlang.float_to_binary(points / 1, decimals: 2) <> " pts"
 end

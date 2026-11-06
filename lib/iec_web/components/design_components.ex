@@ -234,4 +234,81 @@ defmodule IecWeb.DesignComponents do
     </div>
     """
   end
+
+  attr :points, :list, required: true, doc: "`[{year, value}]`, oldest first"
+  attr :colour, :string, required: true
+  attr :label, :string, default: nil, doc: "who the line is for, in its tooltip"
+  attr :class, :string, default: "h-6 w-16"
+
+  @doc """
+  A small trend line across elections, for cards: scaled to its own range, the latest
+  election as a dot. Nothing with fewer than two elections.
+  """
+  def sparkline(assigns) do
+    assigns = assign(assigns, :shape, sparkline_shape(assigns.points))
+
+    ~H"""
+    <svg
+      :if={@shape}
+      viewBox="0 0 100 30"
+      preserveAspectRatio="none"
+      class={["shrink-0 overflow-visible", @class]}
+      role="img"
+      aria-label={sparkline_title(@label, @points)}
+    >
+      <title>{sparkline_title(@label, @points)}</title>
+      <path
+        d={@shape.path}
+        fill="none"
+        stroke={@colour}
+        stroke-width="1.75"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        vector-effect="non-scaling-stroke"
+        opacity="0.8"
+      />
+      <path
+        d={"M#{@shape.last_x} #{@shape.last_y}h0"}
+        stroke={@colour}
+        stroke-width="5"
+        stroke-linecap="round"
+        vector-effect="non-scaling-stroke"
+      />
+    </svg>
+    """
+  end
+
+  defp sparkline_shape(points) when length(points) < 2, do: nil
+
+  defp sparkline_shape(points) do
+    {first_year, _value} = List.first(points)
+    {last_year, _value} = List.last(points)
+    values = Enum.map(points, &elem(&1, 1))
+    {low, high} = {Enum.min(values), Enum.max(values)}
+    span = max(high - low, 1.0)
+    x = fn year -> (year - first_year) / max(last_year - first_year, 1) * 100 end
+    y = fn value -> 27 - (value - low) / span * 24 end
+
+    coordinates =
+      Enum.map(points, fn {year, value} ->
+        "#{:erlang.float_to_binary(x.(year) / 1, decimals: 1)} #{:erlang.float_to_binary(y.(value) / 1, decimals: 1)}"
+      end)
+
+    {_year, last_value} = List.last(points)
+
+    %{
+      path: "M" <> Enum.join(coordinates, "L"),
+      last_x: :erlang.float_to_binary(x.(last_year) / 1, decimals: 1),
+      last_y: :erlang.float_to_binary(y.(last_value) / 1, decimals: 1)
+    }
+  end
+
+  defp sparkline_title(label, [{first_year, first} | _rest] = points) do
+    {last_year, last} = List.last(points)
+
+    "#{if label, do: "#{label}: "}#{format_percentage(first)} in #{first_year}, " <>
+      "#{format_percentage(last)} in #{last_year}"
+  end
+
+  defp sparkline_title(_label, []), do: nil
 end

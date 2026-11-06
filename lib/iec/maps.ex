@@ -226,7 +226,7 @@ defmodule Iec.Maps do
   @doc """
   The outlines of one level, optionally within a province or municipality.
 
-  Filters: `:province_id`, `:municipality_id`.
+  Filters: `:province_id`, `:municipality_id`, `:area_ids`.
   """
   def list_boundaries(level, filters \\ []) do
     Boundary
@@ -242,8 +242,57 @@ defmodule Iec.Maps do
       {:province_id, id}, query -> where(query, [boundary], boundary.province_id == ^id)
       {:municipality_id, nil}, query -> query
       {:municipality_id, id}, query -> where(query, [boundary], boundary.municipality_id == ^id)
+      {:area_ids, nil}, query -> query
+      {:area_ids, ids}, query -> where(query, [boundary], boundary.area_id in ^ids)
       {_other, _value}, query -> query
     end)
+  end
+
+  @doc """
+  The live wards around a ward, nearest first: those whose bounding box touches its own
+  (grown by a tenth), in any municipality, at most `limit`. Empty for a ward without an
+  outline.
+  """
+  def list_nearby_ward_ids(ward_id, limit \\ 12) do
+    case Repo.one(
+           from boundary in Boundary,
+             where:
+               boundary.election == ^Results.live_year() and boundary.level == :ward and
+                 boundary.area_id == ^ward_id,
+             # Only the box: the outline itself is large.
+             select: map(boundary, [:min_x, :min_y, :max_x, :max_y])
+         ) do
+      nil ->
+        []
+
+      ward ->
+        margin = max(round(max(ward.max_x - ward.min_x, ward.max_y - ward.min_y) * 0.1), 1)
+        centre_x = (ward.min_x + ward.max_x) / 2
+        centre_y = (ward.min_y + ward.max_y) / 2
+
+        Repo.all(
+          from boundary in Boundary,
+            where:
+              boundary.election == ^Results.live_year() and boundary.level == :ward and
+                boundary.area_id != ^ward_id and
+                boundary.max_x >= ^(ward.min_x - margin) and
+                boundary.min_x <= ^(ward.max_x + margin) and
+                boundary.max_y >= ^(ward.min_y - margin) and
+                boundary.min_y <= ^(ward.max_y + margin),
+            order_by:
+              fragment(
+                "power((? + ?) / 2.0 - ?, 2) + power((? + ?) / 2.0 - ?, 2)",
+                boundary.min_x,
+                boundary.max_x,
+                ^centre_x,
+                boundary.min_y,
+                boundary.max_y,
+                ^centre_y
+              ),
+            limit: ^limit,
+            select: boundary.area_id
+        )
+    end
   end
 
   @doc "A viewBox (`\"x y width height\"`) framing every outline, with a small margin."

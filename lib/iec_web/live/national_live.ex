@@ -42,11 +42,19 @@ defmodule IecWeb.NationalLive do
       Results.list_latest_snapshots(election: previous_year, level: :province)
       |> Map.new(&{&1.area_id, &1})
 
+    national_history = Results.list_snapshots_by_election(:national, 0)
+
     Map.new(
       national: national,
+      share_points: Trends.points_by_party(national_history),
+      # Each province's parties across elections, for the cards' sparklines.
+      province_points:
+        Map.new(Results.list_snapshots_by_election(:province), fn {province_id, snapshots} ->
+          {province_id, Trends.points_by_party(snapshots)}
+        end),
       summary: Narrative.summary(national, party_rows, parties, previous_year),
       trend:
-        Trends.series(Results.list_snapshots_by_election(:national, 0), :vote_percentage, parties,
+        Trends.series(national_history, :vote_percentage, parties,
           threshold: 4,
           limit: 5
         ),
@@ -165,6 +173,12 @@ defmodule IecWeb.NationalLive do
                     {format_number(row.seats)} seats
                   </span>
                 </span>
+                <.sparkline
+                  points={@share_points[row.party_id] || []}
+                  colour={party_colour(@parties, row)}
+                  label={row.party}
+                  class="hidden h-7 w-16 sm:block"
+                />
                 <span class="text-right">
                   <span class="block font-serif text-xl tabular-nums leading-none">
                     {format_percentage(row.share)}
@@ -206,6 +220,7 @@ defmodule IecWeb.NationalLive do
           <.province_card
             :for={province <- Enum.sort_by(@province_rows, & &1.name)}
             province={province}
+            points={get_in(@province_points, [province.area_id, province.leader_id]) || []}
             parties={@parties}
             previous_year={@previous_year}
           />
@@ -247,6 +262,7 @@ defmodule IecWeb.NationalLive do
   end
 
   attr :province, :map, required: true
+  attr :points, :list, default: [], doc: "the leader's share in each election"
   attr :parties, :map, required: true
   attr :previous_year, :integer, required: true
 
@@ -275,8 +291,17 @@ defmodule IecWeb.NationalLive do
             <span class="font-medium">{@province.leader || "–"}</span>
           </div>
         </div>
-        <div class="font-serif text-3xl tabular-nums leading-none">
-          {format_percentage(@province.share)}
+        <div class="flex items-end gap-3">
+          <.sparkline
+            :if={@province.leader_id}
+            points={@points}
+            colour={party_colour(@parties, %{party_id: @province.leader_id})}
+            label={@province.leader}
+            class="mb-0.5 h-7 w-16"
+          />
+          <div class="font-serif text-3xl tabular-nums leading-none">
+            {format_percentage(@province.share)}
+          </div>
         </div>
       </div>
       <.mini_share_bar segments={@province.segments} parties={@parties} />

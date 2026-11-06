@@ -70,11 +70,26 @@ To start again from nothing: `mix ecto.reset`.
   hatched while counting), only the areas that changed hands since 2021, close contests
   (shaded by the lead over the runner-up) or spoilt ballots (provinces and
   municipalities; the IEC publishes no ward figure). Scroll, pinch or use the buttons to
-  zoom, drag to move, hover for details, click to open an area
+  zoom, drag to move, hover for details, click to open an area (on a phone, tap once for
+  details and again to open)
 - `/provinces/:id`: parties vs 2021, a map of its municipalities, and each municipality's
   council control and leader, now and in 2021
-- `/municipalities/:id`: council control now and in 2021, every followed party vs 2021,
-  a ward map, each ward's winner now and in 2021, and the change history
+- `/municipalities/:id`: a dashboard: council control now and in 2021, voters, ballots,
+  spoilt ballots and seats against 2021, the vote share since 2000, wards won per party
+  against who won the same wards in 2021, every ward to pick from, the closest wards and
+  those that changed hands, every followed party vs 2021, a ward map, each ward's winner
+  now and in 2021, and the change history
+- `/wards` (the search link in the header): find a ward by municipality or city and ward
+  number ("Pretoria 45", "tswane 12", "EC153 18"), or by its IEC ward id. Misspellings
+  and half-typed names still match; the big cities and towns are known by their own names
+  (Durban, Gqeberha, Soweto). Enter opens the best match, the arrow keys move through the
+  results. A municipality alone lists its wards in their leaders' colours. The IEC names
+  wards by number only, so suburbs and streets find nothing
+- `/wards/:id`: a ward's dashboard: who won or leads it and by how much, against 2021,
+  every party's share, swing and share of the whole council, the ward since 2021 and its
+  council since 2000 as charts, who runs the council, a map of it and the wards around it
+  (in any municipality) and those wards' results. Every ward on a map or in a table opens
+  it
 - `/parties/:id` (click any party name): stats vs 2021, who it lost wards and councils to
   and gained them from, net change per province, and the councils and wards behind that
 - `/trends`: every local election since 2000 (imported once): vote share, seats won and

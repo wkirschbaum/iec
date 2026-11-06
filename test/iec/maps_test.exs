@@ -109,4 +109,33 @@ defmodule Iec.MapsTest do
 
     assert [1, 2] == Maps.list_boundaries(:ward, municipality_id: 3003) |> Enum.map(& &1.area_id)
   end
+
+  test "list_nearby_ward_ids/2 lists the wards around a ward, nearest first" do
+    now = DateTime.utc_now()
+
+    # Ward 1 is a 10-unit square; 2 touches it, 3 is a little further off, 4 is far away.
+    rows =
+      for {area_id, min_x} <- [{1, 0}, {2, 10}, {3, 11}, {4, 100}] do
+        %{
+          election: 2026,
+          level: :ward,
+          area_id: area_id,
+          municipality_id: 3003,
+          province_id: 3,
+          name: "Ward #{area_id}",
+          path: "M0 0l1 0 0 1z",
+          min_x: min_x,
+          min_y: 0,
+          max_x: min_x + 10,
+          max_y: 10,
+          inserted_at: now
+        }
+      end
+
+    Repo.insert_all(Boundary, rows)
+
+    assert Maps.list_nearby_ward_ids(1) == [2, 3]
+    assert Maps.list_nearby_ward_ids(1, 1) == [2]
+    assert Maps.list_nearby_ward_ids(5) == []
+  end
 end

@@ -127,6 +127,36 @@ defmodule IecWeb.TableRows do
     end
   end
 
+  @doc """
+  One row per ward from the directory (`Iec.Wards`) with its result from
+  `Iec.Maps.list_area_results/2`: who leads and by how much, who led before, and whether
+  it is declared. A ward without results has nil figures and the status "no results".
+  """
+  def ward_result_rows(wards, results, parties) do
+    for ward <- wards do
+      result = results[ward.ward_id]
+      leader_id = result && result.leader
+      previous_leader_id = result && result.previous_leader
+
+      Map.merge(ward, %{
+        ward: {ward.municipality_name || "", ward.ward_number},
+        leader_id: leader_id,
+        leader: leader_id && party_abbreviation(parties, %{party_id: leader_id}),
+        share: result && result.share,
+        margin: result && result.margin,
+        previous_leader_id: previous_leader_id,
+        previous_leader:
+          previous_leader_id && party_abbreviation(parties, %{party_id: previous_leader_id}),
+        status:
+          case result do
+            %{status: :complete} -> "declared"
+            %{status: :counting} -> "counting"
+            _no_results -> "no results"
+          end
+      })
+    end
+  end
+
   # The leader's part of a bar holding only the two leading parties, in percent.
   defp two_party_width(leader_share, runner_up_share)
        when is_number(leader_share) and is_number(runner_up_share) and

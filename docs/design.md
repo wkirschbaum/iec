@@ -39,6 +39,19 @@ is, or "Final results"), a serif title, and a one-line summary written from the 
 - **Overview**: headline sentence; the vote share as one bar against the previous
   election; key figures; the map beside the standings; province cards; highlights; the
   full sortable table last.
+- **Ward**: the same opening, written for the citizen asking "who won where I live": the
+  winner and lead against the previous election, the ward and its council over time,
+  then the parties, then the ward on a map among its neighbours and their results. Found
+  from **Find your ward**, a search in the masthead that forgives spelling, knows cities
+  by their own names and opens the best match on Enter.
+- **Municipality**: a dashboard: the opening and key figures, then the long run since
+  2000, wards won, every ward as a button to pick, the closest wards and those that
+  changed hands, then the full tables.
+- **Cards** carry a sparkline: a party's or an area's leader's share in every election.
+
+**Clickable, never flaky**: every ward, municipality and party opens its page wherever it
+appears, cards and rows are one link each (links never nest, so a tap goes where it
+looks like it goes), and a map area opens on click but never after a drag.
 - **Province, municipality, party**: the same opening, then their own sections, each
   under a serif section heading over a hairline rule.
 - **Changes**: a digest, not a firehose. One card per update round with a summary line;
@@ -56,7 +69,8 @@ and "Live · 76% counted" becomes "Final results" when the count completes.
 - Key figures fall into two columns; cards stack; segmented controls scroll sideways.
 - Wide tables scroll sideways with their **first column pinned**.
 - Touch targets are at least 40 px; taps press in slightly (`active:scale-95`).
-- The map zooms with a pinch and pans with a drag; a drag never counts as a tap.
+- The map zooms with a pinch and pans with a drag; a drag never counts as a tap. The
+  first tap on an area shows what it is, a second opens it.
 
 ## Where it lives
 

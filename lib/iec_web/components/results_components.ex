@@ -38,6 +38,10 @@ defmodule IecWeb.ResultsComponents do
   def format_percentage(nil), do: "–"
   def format_percentage(value), do: :erlang.float_to_binary(value / 1, decimals: 2) <> "%"
 
+  @doc "A lead in percentage points: 2.00 pts."
+  def format_points(nil), do: "–"
+  def format_points(points), do: :erlang.float_to_binary(points / 1, decimals: 2) <> " pts"
+
   @doc "A signed delta: votes and seats as integers, percentages as points."
   def format_delta(nil, _kind), do: "–"
   def format_delta(delta, _kind) when delta == 0, do: "0"
@@ -108,6 +112,10 @@ defmodule IecWeb.ResultsComponents do
   attr :parties, :map, required: true
   attr :party_result, :map, required: true
 
+  attr :link, :boolean,
+    default: true,
+    doc: "false inside something that is itself a link: links must not nest"
+
   def party_label(assigns) do
     ~H"""
     <span class="inline-flex items-center gap-2" title={Map.get(@party_result, :party_name)}>
@@ -116,13 +124,13 @@ defmodule IecWeb.ResultsComponents do
         style={"background-color: #{party_colour(@parties, @party_result)}"}
       />
       <.link
-        :if={@party_result.party_id >= 0}
+        :if={@link and @party_result.party_id >= 0}
         navigate={~p"/parties/#{@party_result.party_id}"}
         class="font-medium hover:underline"
       >
         {party_abbreviation(@parties, @party_result)}
       </.link>
-      <span :if={@party_result.party_id < 0} class="font-medium">
+      <span :if={not @link or @party_result.party_id < 0} class="font-medium">
         {party_abbreviation(@parties, @party_result)}
       </span>
     </span>
@@ -144,13 +152,16 @@ defmodule IecWeb.ResultsComponents do
   @doc "Who runs a council: a majority party, or hung with its largest party."
   def council_control(assigns) do
     ~H"""
-    <span :if={@control && @control.majority} class="inline-flex items-center gap-2">
+    <span
+      :if={@control && @control.majority}
+      class="inline-flex flex-wrap items-center gap-x-2 gap-y-1"
+    >
       <.party_label parties={@parties} party_result={%{party_id: @control.majority}} />
       <span class="opacity-60">majority</span>
     </span>
     <span
       :if={@control && is_nil(@control.majority) && @control.largest}
-      class="inline-flex items-center gap-2"
+      class="inline-flex flex-wrap items-center gap-x-2 gap-y-1"
     >
       <span :if={not @counting} class="badge badge-warning badge-sm">hung</span>
       <span :if={@control.largest == @party_id} class="opacity-75">
@@ -398,14 +409,137 @@ defmodule IecWeb.ResultsComponents do
     """
   end
 
+  attr :id, :string, required: true
+  attr :rows, :list, required: true, doc: "from IecWeb.TableRows.ward_result_rows/3"
+  attr :parties, :map, required: true
+  attr :previous_year, :integer, required: true
+  attr :sorts, :map, required: true
+
+  @doc "Wards with who leads them, by how much, and who led before; each opens its page."
+  def ward_results_table(assigns) do
+    ~H"""
+    <div class="overflow-x-auto">
+      <table id={@id} class="table table-sm">
+        <thead>
+          <tr>
+            <.sort_header table={@id} column="ward" sorts={@sorts} first="asc">Ward</.sort_header>
+            <.sort_header table={@id} column="leader" sorts={@sorts} first="asc">
+              Leading
+            </.sort_header>
+            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Share</.sort_header>
+            <.sort_header table={@id} column="margin" sorts={@sorts} align="right" first="asc">
+              Lead
+            </.sort_header>
+            <.sort_header table={@id} column="previous_leader" sorts={@sorts} first="asc">
+              {@previous_year}
+            </.sort_header>
+            <.sort_header table={@id} column="status" sorts={@sorts} first="asc">
+              Status
+            </.sort_header>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-#{row.ward_id}"}>
+            <td class="whitespace-nowrap">
+              <.link navigate={~p"/wards/#{row.ward_id}"} class="link font-medium">
+                Ward {row.ward_number}
+              </.link>
+              <span class="opacity-60">· {row.municipality_name}</span>
+            </td>
+            <td>
+              <.party_or_dash parties={@parties} party_id={row.leader_id} empty="no results" />
+            </td>
+            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
+            <td class="text-right tabular-nums">
+              {format_points(row.margin)}
+            </td>
+            <td class="opacity-75">
+              <.party_or_dash parties={@parties} party_id={row.previous_leader_id} />
+            </td>
+            <td class="opacity-75">{row.status}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
+
+  attr :ward_id, :integer, required: true
+  attr :ward_number, :integer, required: true
+  attr :result, :map, default: nil, doc: "from Iec.Maps.list_area_results/2"
+  attr :parties, :map, required: true
+  attr :dimmed, :boolean, default: false, doc: "not what is being looked for"
+  attr :current, :boolean, default: false, doc: "the ward being looked at, or the exact match"
+
+  @doc """
+  A ward's number on a button that opens it: a dot in its leader's colour, hollow while
+  counting, grey before results.
+  """
+  def ward_chip(assigns) do
+    ~H"""
+    <.link
+      navigate={~p"/wards/#{@ward_id}"}
+      id={"ward-chip-#{@ward_id}"}
+      class={[
+        "flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2 text-sm tabular-nums transition-all active:scale-95",
+        @current && "border-base-content bg-base-content font-semibold text-base-100",
+        !@current &&
+          "border-base-300 bg-base-100 hover:-translate-y-px hover:border-base-content/30 hover:shadow-sm",
+        @dimmed && "opacity-30 hover:opacity-100"
+      ]}
+      title={ward_chip_title(@ward_number, @result, @parties)}
+    >
+      <span
+        class={[
+          "inline-block size-2.5 shrink-0 rounded-full",
+          is_nil(@result) && "bg-base-300",
+          @result && @result.status == :counting && "border-2 bg-transparent"
+        ]}
+        style={
+          @result &&
+            "#{if @result.status == :counting, do: "border-color", else: "background-color"}: #{party_colour(@parties, %{party_id: @result.leader})}"
+        }
+      />
+      {@ward_number}
+    </.link>
+    """
+  end
+
+  defp ward_chip_title(number, nil, _parties), do: "Ward #{number}: no results yet"
+
+  defp ward_chip_title(number, result, parties) do
+    verb = if result.status == :complete, do: "won by", else: "led by"
+
+    "Ward #{number}: #{verb} #{party_abbreviation(parties, %{party_id: result.leader})} " <>
+      "(#{format_percentage(result.share)})"
+  end
+
+  attr :segments, :list, required: true, doc: "`[{text, matched?}]`"
+
+  @doc "A name with the parts that matched a search marked."
+  def highlighted(assigns) do
+    ~H"""
+    <span><span
+      :for={{text, matched} <- @segments}
+      class={matched && "rounded-sm bg-primary/15 text-primary"}
+    >{text}</span></span>
+    """
+  end
+
   attr :parties, :map, required: true
   attr :party_id, :integer, default: nil
   attr :empty, :string, default: "–"
+  attr :link, :boolean, default: true, doc: "false inside a link"
 
   @doc "A party's label, or a dash (or `empty`) when there is none."
   def party_or_dash(assigns) do
     ~H"""
-    <.party_label :if={@party_id} parties={@parties} party_result={%{party_id: @party_id}} />
+    <.party_label
+      :if={@party_id}
+      parties={@parties}
+      party_result={%{party_id: @party_id}}
+      link={@link}
+    />
     <span :if={is_nil(@party_id)} class="opacity-60">{@empty}</span>
     """
   end

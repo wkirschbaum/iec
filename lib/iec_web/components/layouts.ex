@@ -84,6 +84,21 @@ defmodule IecWeb.Layouts do
         </nav>
         <div class="ml-auto flex items-center gap-3">
           <.link
+            navigate={~p"/wards"}
+            id="find-ward"
+            aria-label="Find your ward"
+            title="Find your ward"
+            class={[
+              "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition-colors",
+              @active == :wards && "bg-base-content font-medium text-base-100",
+              @active != :wards && "text-base-content/60 hover:bg-base-200 hover:text-base-content"
+            ]}
+          >
+            <.icon name="hero-magnifying-glass-micro" class="size-4" />
+            <%!-- Beside the full navigation there is room for the icon only. --%>
+            <span class="hidden sm:inline lg:hidden">Find your ward</span>
+          </.link>
+          <.link
             navigate={~p"/about"}
             class={[
               "rounded-full px-3 py-1.5 text-sm transition-colors",
