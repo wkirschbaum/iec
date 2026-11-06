@@ -186,7 +186,7 @@ defmodule IecWeb.Layouts do
       </div>
 
       <%!-- On phones the navigation sits here, within thumb reach. --%>
-      <nav class="grid grid-cols-4 border-t border-base-300 md:hidden" aria-label="Sections">
+      <nav class="grid grid-cols-5 border-t border-base-300 md:hidden" aria-label="Sections">
         <.link
           :for={{label, path, page, icon} <- tab_items()}
           navigate={path}
@@ -208,6 +208,7 @@ defmodule IecWeb.Layouts do
     [
       {"Overview", ~p"/", :national, "hero-home"},
       {"Map", ~p"/map", :map, "hero-map"},
+      {"Trends", ~p"/trends", :trends, "hero-presentation-chart-line"},
       {"Movers", ~p"/movers", :movers, "hero-arrows-up-down"},
       {"Changes", ~p"/changes", :changes, "hero-bolt"}
     ]
@@ -277,6 +278,7 @@ defmodule IecWeb.Layouts do
     [
       {"Overview", ~p"/", :national},
       {"Map", ~p"/map", :map},
+      {"Trends", ~p"/trends", :trends},
       {"Winners & losers", ~p"/movers", :movers},
       {"Changes", ~p"/changes", :changes}
     ]

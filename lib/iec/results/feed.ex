@@ -19,6 +19,10 @@ defmodule Iec.Results.Feed do
   def live_election, do: config()[:live_election]
   def previous_election, do: config()[:previous_election]
 
+  @doc "Every election, oldest first: the earlier ones, the previous one and the live one."
+  def all_elections,
+    do: (config()[:history_elections] || []) ++ [previous_election(), live_election()]
+
   @doc "The national file and each province file of an election (default: the live one)."
   def feeds(election \\ live_election()) do
     base_url = "#{config()[:base_url]}/#{election.year}"

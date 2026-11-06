@@ -23,6 +23,9 @@ defmodule Iec.Seed do
     report.("#{previous.year} results")
     Results.import_previous_election()
 
+    report.("Earlier elections, for the trends")
+    Results.import_history()
+
     report.("#{live.year} results")
     for feed <- Feed.feeds(live), do: Results.import_feed(feed)
     Parties.follow_national_parties()

@@ -22,6 +22,13 @@ config :iec, Iec.Results,
   live_election: %{year: 2026, electoral_event: "EEID1887"},
   # Imported once (its files are final) to compare against. `var EEID2021` on the same page.
   previous_election: %{year: 2021, electoral_event: "EEID1091"},
+  # Earlier elections, imported once for the trends (event ids from the same page).
+  history_elections: [
+    %{year: 2000, electoral_event: "EEID2"},
+    %{year: 2006, electoral_event: "EEID95"},
+    %{year: 2011, electoral_event: "EEID197"},
+    %{year: 2016, electoral_event: "EEID402"}
+  ],
   province_ids: Enum.to_list(1..9),
   poll: true
 

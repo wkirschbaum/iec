@@ -3,10 +3,11 @@ defmodule IecWeb.NationalLive do
 
   import IecWeb.ResultsComponents
   import IecWeb.DesignComponents
+  import IecWeb.ChartComponents
 
   alias Iec.Results
   alias Iec.Results.Change
-  alias IecWeb.{ChangeDigest, Narrative, TableRows}
+  alias IecWeb.{ChangeDigest, Narrative, TableRows, Trends}
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results]}
@@ -37,6 +38,14 @@ defmodule IecWeb.NationalLive do
     assign(socket,
       national: national,
       summary: Narrative.summary(national, party_rows, parties, previous_year),
+      trend:
+        Trends.series(Results.list_snapshots_by_election(:national, 0), :vote_percentage, parties,
+          threshold: 4,
+          limit: 5
+        ),
+      counting:
+        national != nil and
+          national.voting_districts_complete < national.voting_districts_expected,
       party_rows: party_rows,
       standings: party_rows |> Enum.filter(&(&1.party_id >= 0)) |> Enum.take(8),
       province_rows:
@@ -162,6 +171,23 @@ defmodule IecWeb.NationalLive do
               </.link>
             </li>
           </ol>
+        </div>
+      </section>
+
+      <section :if={length(@trend.years) > 1} class="space-y-4">
+        <.section_heading title={"Since #{List.first(@trend.years)}"}>
+          <:subtitle>Share of the vote in every local election</:subtitle>
+          <:actions>
+            <.link navigate={~p"/trends"} class="link-hover link">All trends →</.link>
+          </:actions>
+        </.section_heading>
+        <div class="panel p-5 sm:p-7">
+          <.line_chart
+            id="national-trend"
+            trend={@trend}
+            live_year={@live_year}
+            counting={@counting}
+          />
         </div>
       </section>
 

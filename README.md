@@ -75,6 +75,9 @@ To start again from nothing: `mix ecto.reset`.
   a ward map, each ward's winner now and in 2021, and the change history
 - `/parties/:id` (click any party name): stats vs 2021, who it lost wards and councils to
   and gained them from, net change per province, and the councils and wards behind that
+- `/trends`: every local election since 2000 (imported once): vote share, seats won and
+  councils with a majority per party, registered voters and ballots, and each province
+  as a small chart; 2026 is dashed while its count runs
 - `/movers`: biggest winners and losers by vote share swing, wards and council
   majorities changing hands per party, and the biggest local surges and collapses
 - `/changes`: every change, filterable by level

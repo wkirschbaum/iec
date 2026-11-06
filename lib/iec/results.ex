@@ -124,9 +124,22 @@ defmodule Iec.Results do
   Imports the previous election's final results, file by file, skipping files already
   stored (so a failed file is retried on the next start). Its files no longer change.
   """
-  def import_previous_election do
-    election = Feed.previous_election()
+  def import_previous_election, do: import_election(Feed.previous_election())
 
+  @doc """
+  Imports the earlier elections (config `history_elections`) for the trends: national
+  and province results, once each.
+  """
+  def import_history do
+    for election <- Feed.all_elections(),
+        election.year not in [live_year(), previous_year()],
+        do: import_election(election)
+
+    :ok
+  end
+
+  @doc "Imports an election's national and province files not stored yet."
+  def import_election(election) do
     imported =
       Repo.all(from fetch in Fetch, where: fetch.election == ^election.year, select: fetch.feed)
 
@@ -148,13 +161,13 @@ defmodule Iec.Results do
   end
 
   @doc """
-  Stores party abbreviations, names and colours from the dashboard's party lists. The
-  live election's list is applied last, so its names win for parties in both.
+  Stores party abbreviations, names and colours from every election's party list, oldest
+  first, so the latest names win for parties in several.
   """
   def refresh_parties do
     now = DateTime.utc_now()
 
-    for election <- [Feed.previous_election(), Feed.live_election()],
+    for election <- Feed.all_elections(),
         {:ok, parties, _body, _cache} <- [Feed.get(Feed.party_list_url(election))] do
       rows =
         for party <- parties,
@@ -185,6 +198,34 @@ defmodule Iec.Results do
   def parties_by_id, do: Repo.all(Party) |> Map.new(&{&1.id, &1})
 
   ## Reading
+
+  @doc """
+  An area's latest snapshot in every election, oldest first: `[{year, snapshot}]`, for
+  trends. Elections without results for the area are left out.
+  """
+  def list_snapshots_by_election(level, area_id) do
+    Snapshot
+    |> where([snapshot], snapshot.level == ^level and snapshot.area_id == ^area_id)
+    |> distinct([snapshot], snapshot.election)
+    |> order_by([snapshot], asc: snapshot.election, desc: snapshot.id)
+    |> preload(party_results: ^party_results_query())
+    |> Repo.all()
+    |> Enum.map(&{&1.election, &1})
+  end
+
+  @doc """
+  The latest snapshot of every area at a level in every election: `%{area_id =>
+  [{year, snapshot}]}`, oldest first.
+  """
+  def list_snapshots_by_election(level) do
+    Snapshot
+    |> where([snapshot], snapshot.level == ^level)
+    |> distinct([snapshot], [snapshot.area_id, snapshot.election])
+    |> order_by([snapshot], asc: snapshot.area_id, asc: snapshot.election, desc: snapshot.id)
+    |> preload(party_results: ^party_results_query())
+    |> Repo.all()
+    |> Enum.group_by(& &1.area_id, &{&1.election, &1})
+  end
 
   @doc "The latest snapshot of an area, with its party results, or nil."
   def get_latest_snapshot(level, area_id, filters \\ []) do

@@ -39,6 +39,7 @@ defmodule Iec.Application do
            fn ->
              Iec.Results.refresh_parties()
              Iec.Results.import_previous_election()
+             Iec.Results.import_history()
              Iec.Parties.follow_national_parties()
              Iec.Maps.import_boundaries()
              Iec.Parties.import_municipality_files()
