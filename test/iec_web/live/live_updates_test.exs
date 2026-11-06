@@ -81,7 +81,7 @@ defmodule IecWeb.LiveUpdatesTest do
 
   test "the national page shows new results as they arrive", %{conn: conn} do
     {:ok, view, html} = live(conn, ~p"/")
-    assert html =~ "No results yet"
+    assert html =~ "Waiting for the first results"
 
     ingest_national(500)
     assert eventually_render(view, "50.0%") =~ ~s(id="national-parties")

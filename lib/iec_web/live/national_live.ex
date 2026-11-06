@@ -2,10 +2,11 @@ defmodule IecWeb.NationalLive do
   use IecWeb, :live_view
 
   import IecWeb.ResultsComponents
+  import IecWeb.DesignComponents
 
   alias Iec.Results
   alias Iec.Results.Change
-  alias IecWeb.TableRows
+  alias IecWeb.{ChangeDigest, Narrative, TableRows}
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results]}
@@ -15,7 +16,7 @@ defmodule IecWeb.NationalLive do
     {:ok,
      socket
      |> assign(
-       page_title: "National",
+       page_title: "Overview",
        live_year: Results.live_year(),
        previous_year: Results.previous_year()
      )
@@ -27,6 +28,7 @@ defmodule IecWeb.NationalLive do
     %{previous_year: previous_year, parties: parties} = socket.assigns
     national = Results.get_latest_snapshot(:national, 0)
     previous_national = Results.get_latest_snapshot(:national, 0, election: previous_year)
+    party_rows = TableRows.party_rows(national, previous_national, parties)
 
     previous_provinces =
       Results.list_latest_snapshots(election: previous_year, level: :province)
@@ -34,83 +36,227 @@ defmodule IecWeb.NationalLive do
 
     assign(socket,
       national: national,
-      previous_national: previous_national,
-      party_rows: TableRows.party_rows(national, previous_national, parties),
+      summary: Narrative.summary(national, party_rows, parties, previous_year),
+      party_rows: party_rows,
+      standings: party_rows |> Enum.filter(&(&1.party_id >= 0)) |> Enum.take(8),
       province_rows:
         TableRows.area_rows(
           Results.list_latest_snapshots(level: :province),
           previous_provinces,
           parties
         ),
-      changes: Results.list_changes(changed_only: true, limit: 15) |> Enum.map(&Change.compare/1)
+      highlights:
+        Results.list_changes(changed_only: true, limit: 300)
+        |> Enum.map(&Change.compare/1)
+        |> ChangeDigest.highlights()
+        |> Enum.take(6)
     )
   end
 
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <h1 class="text-2xl font-semibold">{@live_year} Local Government Elections</h1>
+    <Layouts.app
+      flash={@flash}
+      feed_status={@feed_status}
+      count_progress={@count_progress}
+      active={:national}
+    >
+      <.page_header
+        eyebrow={(@summary && @summary.eyebrow) || "Local Government Elections #{@live_year}"}
+        live={@summary != nil and @summary.live}
+        title={(@summary && @summary.headline) || "Waiting for the first results"}
+      >
+        <:lede :if={@summary}>{@summary.lede}</:lede>
+        <:lede :if={is_nil(@summary)}>
+          The first poll of the IEC's results runs a few seconds after start-up.
+        </:lede>
+      </.page_header>
 
-      <div :if={is_nil(@national)} class="alert">
-        No results yet. The first poll runs a few seconds after start-up.
-      </div>
-
-      <section :if={@national} class="space-y-6">
-        <.progress_grid snapshot={@national} />
-        <.turnout
-          snapshot={@national}
-          previous_election={@previous_national}
-          previous_year={@previous_year}
-        />
-        <.party_table
-          id="national-parties"
-          rows={@party_rows}
-          parties={@parties}
-          previous_year={@previous_year}
-          sorts={@sorts}
-          show_councils
-        />
-      </section>
-
-      <section class="space-y-3">
-        <div class="flex items-baseline justify-between">
-          <h2 class="text-lg font-semibold">Who leads where</h2>
-          <.link navigate={~p"/map"} class="link text-sm">Full map</.link>
+      <section :if={@national} class="panel space-y-8 p-5 sm:p-7">
+        <.vote_share_bar rows={@party_rows} parties={@parties} previous_year={@previous_year} />
+        <div class="grid grid-cols-2 gap-x-6 gap-y-6 border-t border-base-300 pt-6 lg:grid-cols-5">
+          <.kpi
+            label="Districts counted"
+            value={
+              format_progress(
+                @national.voting_districts_complete,
+                @national.voting_districts_expected
+              )
+            }
+          >
+            {format_number(@national.voting_districts_complete)} of {format_number(
+              @national.voting_districts_expected
+            )}
+          </.kpi>
+          <.kpi label="Votes counted" value={format_compact(@national.total_votes_cast)}>
+            of {format_compact(@national.registered_voters)} registered
+          </.kpi>
+          <.kpi
+            label="Councils decided"
+            value={"#{@national.municipalities_complete} / #{@national.municipalities_expected}"}
+          >
+            {@national.majority_councils} with a majority
+          </.kpi>
+          <.kpi label="Hung councils" value={format_number(@national.hung_councils)}>
+            no party over half the seats
+          </.kpi>
+          <.kpi
+            label="Wards declared"
+            value={format_number(@national.wards_complete)}
+            class="col-span-2 lg:col-span-1"
+          >
+            of {format_number(@national.wards_expected)}
+          </.kpi>
         </div>
-        <.live_component
-          module={IecWeb.MapComponent}
-          id="national-map"
-          level={:municipality}
-          parties={@parties}
-          refreshed_at={@refreshed_at}
-        />
       </section>
 
-      <section :if={@province_rows != []} class="space-y-3">
-        <h2 class="text-lg font-semibold">Provinces</h2>
-        <.area_table
-          id="provinces"
-          rows={@province_rows}
-          parties={@parties}
-          previous_year={@previous_year}
-          sorts={@sorts}
-          area_label="Province"
-          area_path={&~p"/provinces/#{&1}"}
-        />
-      </section>
-
-      <section class="space-y-2">
-        <div class="flex items-baseline justify-between">
-          <h2 class="text-lg font-semibold">Latest changes</h2>
-          <.link navigate={~p"/changes"} class="link text-sm">All changes</.link>
+      <section class="grid gap-6 lg:grid-cols-5">
+        <div class="space-y-4 lg:col-span-3">
+          <.section_heading title="Who leads where">
+            <:subtitle>Each municipality in its leading party's colour</:subtitle>
+            <:actions>
+              <.link navigate={~p"/map"} class="link-hover link">Open the map →</.link>
+            </:actions>
+          </.section_heading>
+          <.live_component
+            module={IecWeb.MapComponent}
+            id="national-map"
+            level={:municipality}
+            parties={@parties}
+            refreshed_at={@refreshed_at}
+          />
         </div>
-        <p :if={@changes == []} class="text-sm opacity-60">Nothing has moved since start-up.</p>
-        <ul id="latest-changes" class="divide-y divide-base-300">
-          <.change_entry :for={change <- @changes} change={change} parties={@parties} />
+
+        <div class="space-y-4 lg:col-span-2">
+          <.section_heading title="Standings">
+            <:subtitle>Share of the vote, change since {@previous_year}</:subtitle>
+          </.section_heading>
+          <ol class="panel divide-y divide-base-300 overflow-hidden">
+            <li :for={{row, rank} <- Enum.with_index(@standings, 1)}>
+              <.link
+                navigate={~p"/parties/#{row.party_id}"}
+                class="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-base-200/70"
+              >
+                <span class="w-4 text-right text-xs tabular-nums text-base-content/40">{rank}</span>
+                <span
+                  class="h-8 w-1 rounded-full"
+                  style={"background-color: #{party_colour(@parties, row)}"}
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-medium">{row.party}</span>
+                  <span class="block text-xs tabular-nums text-base-content/55">
+                    {format_number(row.seats)} seats
+                  </span>
+                </span>
+                <span class="text-right">
+                  <span class="block font-serif text-xl tabular-nums leading-none">
+                    {format_percentage(row.share)}
+                  </span>
+                  <.swing_chip value={row.swing} class="mt-1" />
+                </span>
+                <.icon
+                  name="hero-chevron-right-micro"
+                  class="size-4 text-base-content/30 transition-transform group-hover:translate-x-0.5"
+                />
+              </.link>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section :if={@province_rows != []} class="space-y-4">
+        <.section_heading title="Provinces">
+          <:subtitle>Leading party, share and how far each count is</:subtitle>
+        </.section_heading>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <.province_card
+            :for={province <- Enum.sort_by(@province_rows, & &1.name)}
+            province={province}
+            parties={@parties}
+            previous_year={@previous_year}
+          />
+        </div>
+      </section>
+
+      <section class="space-y-4">
+        <.section_heading title="Highlights">
+          <:subtitle>Leads changing hands and councils decided</:subtitle>
+          <:actions>
+            <.link navigate={~p"/changes"} class="link-hover link">All changes →</.link>
+          </:actions>
+        </.section_heading>
+        <p :if={@highlights == []} class="text-sm text-base-content/60">
+          No lead has changed hands since start-up.
+        </p>
+        <ul :if={@highlights != []} class="panel divide-y divide-base-300">
+          <.highlight :for={event <- @highlights} event={event} parties={@parties} />
         </ul>
       </section>
+
+      <section :if={@national} class="space-y-4">
+        <.section_heading title="All parties">
+          <:subtitle>Click a heading to sort</:subtitle>
+        </.section_heading>
+        <div class="panel p-2 sm:p-4">
+          <.party_table
+            id="national-parties"
+            rows={@party_rows}
+            parties={@parties}
+            previous_year={@previous_year}
+            sorts={@sorts}
+            show_councils
+          />
+        </div>
+      </section>
     </Layouts.app>
+    """
+  end
+
+  attr :province, :map, required: true
+  attr :parties, :map, required: true
+  attr :previous_year, :integer, required: true
+
+  defp province_card(assigns) do
+    ~H"""
+    <.link
+      navigate={~p"/provinces/#{@province.area_id}"}
+      id={"province-card-#{@province.area_id}"}
+      class="panel group block space-y-4 p-5 transition-all hover:-translate-y-0.5 hover:border-base-content/20 hover:shadow-lg"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <h3 class="text-lg font-medium leading-tight">{@province.name}</h3>
+        <span class="text-xs tabular-nums text-base-content/55">
+          {format_progress(@province.counted)} counted
+        </span>
+      </div>
+      <div class="flex items-end justify-between gap-3">
+        <div>
+          <div class="eyebrow">Leading</div>
+          <div class="mt-1 flex items-center gap-2">
+            <span
+              :if={@province.leader_id}
+              class="size-3 rounded-full"
+              style={"background-color: #{party_colour(@parties, %{party_id: @province.leader_id})}"}
+            />
+            <span class="font-medium">{@province.leader || "–"}</span>
+          </div>
+        </div>
+        <div class="font-serif text-3xl tabular-nums leading-none">
+          {format_percentage(@province.share)}
+        </div>
+      </div>
+      <.mini_share_bar segments={@province.segments} parties={@parties} />
+      <div class="flex items-center justify-between text-xs text-base-content/55">
+        <span>{@previous_year}: {@province.previous_leader || "–"} {format_percentage(
+          @province.previous_share
+        )}</span>
+        <.icon
+          name="hero-arrow-right-micro"
+          class="size-4 transition-transform group-hover:translate-x-0.5"
+        />
+      </div>
+    </.link>
     """
   end
 end

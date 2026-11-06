@@ -62,10 +62,20 @@ defmodule IecWeb.TableRows do
         previous_leader: previous_leader && party_abbreviation(parties, previous_leader),
         previous_share: previous_leader && previous_leader.vote_percentage,
         complete: complete,
+        segments: segments(snapshot),
         control: council,
         council: if(complete, do: council_label(council, parties, false), else: "counting")
       }
     end
+  end
+
+  # The top parties' shares, biggest first, for a card's mini bar.
+  defp segments(snapshot) do
+    snapshot.party_results
+    |> Enum.filter(&(&1.party_id >= 0 and (&1.vote_percentage || 0) > 0))
+    |> Enum.sort_by(&(-&1.vote_percentage))
+    |> Enum.take(5)
+    |> Enum.map(&{&1.party_id, &1.vote_percentage})
   end
 
   @doc """

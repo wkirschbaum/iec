@@ -9,6 +9,14 @@ defmodule IecWeb.ResultsComponents do
 
   ## Formatting
 
+  @doc "A big number in short form: 20.7M, 412k, 980."
+  def format_compact(nil), do: "–"
+  def format_compact(number) when number >= 1_000_000, do: "#{decimal(number / 1_000_000)}M"
+  def format_compact(number) when number >= 10_000, do: "#{round(number / 1_000)}k"
+  def format_compact(number), do: format_number(number)
+
+  defp decimal(value), do: :erlang.float_to_binary(value, decimals: 1)
+
   def format_number(nil), do: "–"
 
   def format_number(number) when is_integer(number) do
@@ -399,6 +407,54 @@ defmodule IecWeb.ResultsComponents do
     ~H"""
     <.party_label :if={@party_id} parties={@parties} party_result={%{party_id: @party_id}} />
     <span :if={is_nil(@party_id)} class="opacity-60">{@empty}</span>
+    """
+  end
+
+  attr :event, :map, required: true, doc: "from IecWeb.ChangeDigest"
+  attr :parties, :map, required: true
+
+  @doc "A notable event: a lead changing hands, or a council's count finishing."
+  def highlight(assigns) do
+    ~H"""
+    <li class="flex items-start gap-4 px-4 py-3.5">
+      <span class={[
+        "mt-0.5 grid size-8 shrink-0 place-items-center rounded-full",
+        @event.kind == :lead && "bg-warning/15 text-warning",
+        @event.kind == :decided && "bg-success/15 text-success"
+      ]}>
+        <.icon
+          name={
+            if @event.kind == :lead,
+              do: "hero-arrows-right-left-micro",
+              else: "hero-check-badge-micro"
+          }
+          class="size-4"
+        />
+      </span>
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3">
+          <.link navigate={area_path(@event.snapshot)} class="font-medium hover:underline">
+            {@event.snapshot.area_name}
+          </.link>
+          <span class="text-xs tabular-nums text-base-content/50">{format_clock(@event.at)}</span>
+        </div>
+        <p
+          :if={@event.kind == :lead}
+          class="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-base-content/70"
+        >
+          Lead passes from
+          <.party_or_dash parties={@parties} party_id={@event.from && @event.from.party_id} /> to
+          <.party_or_dash parties={@parties} party_id={@event.to && @event.to.party_id} />
+        </p>
+        <p
+          :if={@event.kind == :decided}
+          class="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-base-content/70"
+        >
+          Count complete, largest party
+          <.party_or_dash parties={@parties} party_id={@event.to && @event.to.party_id} />
+        </p>
+      </div>
+    </li>
     """
   end
 

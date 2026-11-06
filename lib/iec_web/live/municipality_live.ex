@@ -2,10 +2,11 @@ defmodule IecWeb.MunicipalityLive do
   use IecWeb, :live_view
 
   import IecWeb.ResultsComponents
+  import IecWeb.DesignComponents
 
   alias Iec.{Parties, Results}
   alias Iec.Results.Change
-  alias IecWeb.TableRows
+  alias IecWeb.{Narrative, TableRows}
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
@@ -58,6 +59,7 @@ defmodule IecWeb.MunicipalityLive do
       previous_municipality: previous_municipality,
       from_party_files: overview.parties != [],
       party_rows: party_rows,
+      summary: Narrative.summary(municipality, party_rows, parties, previous_year),
       ward_rows: ward_rows,
       wards_declared: Enum.count(ward_rows, & &1.holder),
       wards_changed: Enum.count(ward_rows, & &1.changed_hands),
@@ -73,80 +75,87 @@ defmodule IecWeb.MunicipalityLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div :if={is_nil(@municipality)} class="alert">No results for this municipality yet.</div>
+      <div :if={is_nil(@municipality)} class="panel p-6 text-base-content/70">
+        No results for this municipality yet.
+      </div>
 
-      <div :if={@municipality} class="space-y-8">
-        <div>
-          <div class="text-sm">
-            <.link navigate={~p"/"} class="link">National</.link>
+      <div :if={@municipality} class="space-y-12">
+        <.page_header
+          eyebrow={@summary && @summary.eyebrow}
+          live={@summary != nil and @summary.live}
+          title={@municipality.area_name}
+        >
+          <:breadcrumb>
+            <.link navigate={~p"/"} class="link-hover link">Overview</.link>
             /
-            <.link navigate={~p"/provinces/#{@municipality.province_id}"} class="link">
+            <.link navigate={~p"/provinces/#{@municipality.province_id}"} class="link-hover link">
               {@province_name}
             </.link>
-          </div>
-          <h1 class="text-2xl font-semibold">{@municipality.area_name}</h1>
-        </div>
+            /
+          </:breadcrumb>
+          <:lede :if={@summary}>{@summary.headline}. {@summary.lede}</:lede>
+        </.page_header>
 
-        <div class="grid gap-4 sm:grid-cols-3">
-          <.progress
-            label="Voting districts"
-            complete={@municipality.voting_districts_complete}
-            expected={@municipality.voting_districts_expected}
-          />
-          <.progress
-            label="Wards"
-            complete={@municipality.wards_complete}
-            expected={@municipality.wards_expected}
-          />
-          <.progress
-            label="Seats"
-            complete={@municipality.seats_complete}
-            expected={@municipality.seats_expected}
-          />
-        </div>
-
-        <dl class="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <dt class="opacity-60">Council {if @complete, do: "", else: "(counting)"}</dt>
-            <dd class="mt-1">
-              <.council_control parties={@parties} control={@control} counting={not @complete} />
-            </dd>
+        <section class="panel space-y-8 p-5 sm:p-7">
+          <.vote_share_bar rows={@party_rows} parties={@parties} previous_year={@previous_year} />
+          <div class="grid grid-cols-2 gap-6 border-t border-base-300 pt-6 lg:grid-cols-4">
+            <.kpi
+              label="Districts counted"
+              value={
+                format_progress(
+                  @municipality.voting_districts_complete,
+                  @municipality.voting_districts_expected
+                )
+              }
+            >
+              {format_number(@municipality.voting_districts_complete)} of {format_number(
+                @municipality.voting_districts_expected
+              )}
+            </.kpi>
+            <.kpi label="Wards declared" value={format_number(@wards_declared)}>
+              of {length(@ward_rows)} · {@wards_changed} changed hands
+            </.kpi>
+            <div class="min-w-0">
+              <div class="eyebrow">Council {if @complete, do: "now", else: "so far"}</div>
+              <div class="mt-2">
+                <.council_control parties={@parties} control={@control} counting={not @complete} />
+              </div>
+            </div>
+            <div class="min-w-0">
+              <div class="eyebrow">Council in {@previous_year}</div>
+              <div class="mt-2">
+                <.council_control parties={@parties} control={@previous_control} />
+              </div>
+            </div>
           </div>
-          <div>
-            <dt class="opacity-60">Council in {@previous_year}</dt>
-            <dd class="mt-1"><.council_control parties={@parties} control={@previous_control} /></dd>
-          </div>
-        </dl>
-
-        <.turnout
-          snapshot={@municipality}
-          previous_election={@previous_municipality}
-          previous_year={@previous_year}
-          show_councils={false}
-        />
+        </section>
 
         <section class="space-y-2">
-          <h2 class="text-lg font-semibold">Parties</h2>
-          <.party_table
-            :if={not @from_party_files}
-            id="municipality-parties"
-            rows={@party_rows}
-            parties={@parties}
-            previous_year={@previous_year}
-            sorts={@sorts}
-          />
-          <.council_party_table
-            :if={@from_party_files}
-            id="municipality-parties"
-            rows={@party_rows}
-            parties={@parties}
-            previous_year={@previous_year}
-            sorts={@sorts}
-          />
+          <.section_heading title="Parties" />
+          <div class="panel p-2 sm:p-4">
+            <.party_table
+              :if={not @from_party_files}
+              id="municipality-parties"
+              rows={@party_rows}
+              parties={@parties}
+              previous_year={@previous_year}
+              sorts={@sorts}
+            />
+            <.council_party_table
+              :if={@from_party_files}
+              id="municipality-parties"
+              rows={@party_rows}
+              parties={@parties}
+              previous_year={@previous_year}
+              sorts={@sorts}
+            />
+          </div>
         </section>
 
         <section class="space-y-3">
-          <h2 class="text-lg font-semibold">Wards map</h2>
+          <.section_heading title="Wards map">
+            <:subtitle>Each ward in its leading party's colour</:subtitle>
+          </.section_heading>
           <.live_component
             module={IecWeb.MapComponent}
             id="municipality-map"
@@ -158,22 +167,24 @@ defmodule IecWeb.MunicipalityLive do
         </section>
 
         <section :if={@ward_rows != []} class="space-y-2">
-          <h2 class="text-lg font-semibold">
-            Wards
-            <span class="badge badge-sm">{@wards_declared} / {length(@ward_rows)} declared</span>
-            <span class="badge badge-warning badge-sm">{@wards_changed} changed hands</span>
-          </h2>
-          <.ward_winners_table
-            id="municipality-wards"
-            rows={@ward_rows}
-            parties={@parties}
-            previous_year={@previous_year}
-            sorts={@sorts}
-          />
+          <.section_heading title="Wards">
+            <:subtitle>
+              {@wards_declared} of {length(@ward_rows)} declared · {@wards_changed} changed hands
+            </:subtitle>
+          </.section_heading>
+          <div class="panel p-2 sm:p-4">
+            <.ward_winners_table
+              id="municipality-wards"
+              rows={@ward_rows}
+              parties={@parties}
+              previous_year={@previous_year}
+              sorts={@sorts}
+            />
+          </div>
         </section>
 
         <section class="space-y-2">
-          <h2 class="text-lg font-semibold">History</h2>
+          <.section_heading title="History" />
           <p :if={@changes == []} class="text-sm opacity-60">Nothing has moved since start-up.</p>
           <ul id="municipality-changes" class="divide-y divide-base-300">
             <.change_entry

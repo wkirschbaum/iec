@@ -11,6 +11,9 @@ on your own machine: there is no auth.
 
 ![The winners and losers page during the count](docs/winners-and-losers.png)
 
+The design (who it is for, the look, how pages are built, phones) is in
+[docs/design.md](docs/design.md).
+
 ## Getting started
 
 You need Elixir 1.17+ with Erlang/OTP (the Elixir guide covers both) and PostgreSQL:

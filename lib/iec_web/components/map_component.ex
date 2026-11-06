@@ -430,7 +430,7 @@ defmodule IecWeb.MapComponent do
 
   defp legend(assigns) do
     ~H"""
-    <div class="grid gap-4 rounded-box border border-base-300 p-4 text-sm sm:grid-cols-[1fr_auto]">
+    <div class="panel grid gap-4 p-4 text-sm sm:grid-cols-[1fr_auto]">
       <div class="space-y-2">
         <div class="text-xs font-medium uppercase tracking-wider opacity-60">
           {if @mode == :flips,

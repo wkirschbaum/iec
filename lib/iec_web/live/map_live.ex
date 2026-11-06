@@ -1,6 +1,8 @@
 defmodule IecWeb.MapLive do
   use IecWeb, :live_view
 
+  import IecWeb.DesignComponents
+
   alias Iec.Results
 
   @behaviour IecWeb.LiveUpdates
@@ -60,50 +62,52 @@ defmodule IecWeb.MapLive do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div class="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-semibold">Map</h1>
-          <p class="text-sm opacity-60">
-            Coloured as the IEC releases results. Hover for details, click to open an area.
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <div class="join">
-            <.link
+    <Layouts.app
+      flash={@flash}
+      feed_status={@feed_status}
+      count_progress={@count_progress}
+      active={:map}
+    >
+      <.page_header eyebrow="Explore the results" title="Map">
+        <:lede>
+          Coloured as the IEC releases results. Hover or tap an area for its details; open it
+          for the full picture.
+        </:lede>
+      </.page_header>
+
+      <div class="space-y-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <.segmented>
+            <:option
               :for={{label, level} <- @levels}
               patch={map_path(assigns, level: level)}
-              class={["btn btn-sm join-item", @level == level && "btn-primary"]}
+              active={@level == level}
             >
               {label}
-            </.link>
-          </div>
-          <div class="join">
-            <.link
+            </:option>
+          </.segmented>
+          <.segmented>
+            <:option
               :for={{label, mode} <- @modes}
               patch={map_path(assigns, mode: mode)}
-              class={["btn btn-sm join-item", @mode == mode && "btn-primary"]}
+              active={@mode == mode}
             >
               {label}
-            </.link>
-          </div>
+            </:option>
+          </.segmented>
         </div>
-      </div>
-
-      <div class="flex flex-wrap gap-1">
-        <.link
-          patch={map_path(assigns, province: nil)}
-          class={["btn btn-xs", is_nil(@province_id) && "btn-neutral"]}
-        >
-          South Africa
-        </.link>
-        <.link
-          :for={{province_id, name} <- @provinces}
-          patch={map_path(assigns, province: province_id)}
-          class={["btn btn-xs", @province_id == province_id && "btn-neutral"]}
-        >
-          {name}
-        </.link>
+        <.segmented>
+          <:option patch={map_path(assigns, province: nil)} active={is_nil(@province_id)}>
+            South Africa
+          </:option>
+          <:option
+            :for={{province_id, name} <- @provinces}
+            patch={map_path(assigns, province: province_id)}
+            active={@province_id == province_id}
+          >
+            {name}
+          </:option>
+        </.segmented>
       </div>
 
       <.live_component

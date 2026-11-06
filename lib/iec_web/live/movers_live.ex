@@ -2,6 +2,7 @@ defmodule IecWeb.MoversLive do
   use IecWeb, :live_view
 
   import IecWeb.ResultsComponents
+  import IecWeb.DesignComponents
 
   alias Iec.{Parties, Results}
   alias IecWeb.TableRows
@@ -54,14 +55,18 @@ defmodule IecWeb.MoversLive do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div>
-        <h1 class="text-2xl font-semibold">Winners &amp; losers</h1>
-        <p class="text-sm opacity-60">
+    <Layouts.app
+      flash={@flash}
+      feed_status={@feed_status}
+      count_progress={@count_progress}
+      active={:movers}
+    >
+      <.page_header eyebrow={"Since #{@previous_year}"} title="Winners &amp; losers">
+        <:lede>
           Vote share swing since {@previous_year}, and the wards and council majorities that
           changed hands. Updates as the count goes on.
-        </p>
-      </div>
+        </:lede>
+      </.page_header>
 
       <section class="grid gap-4 lg:grid-cols-2">
         <.leaderboard
@@ -139,7 +144,7 @@ defmodule IecWeb.MoversLive do
       assign(assigns, :largest, assigns.rows |> Enum.map(&abs(&1.swing)) |> Enum.max(fn -> 1 end))
 
     ~H"""
-    <div id={@id} class="rounded-box border border-base-300 p-4 space-y-3">
+    <div id={@id} class="panel space-y-4 p-5">
       <h2 class={[
         "text-lg font-semibold",
         @tone == "success" && "text-success",
@@ -215,7 +220,7 @@ defmodule IecWeb.MoversLive do
     assigns = assign(assigns, :largest, max(largest, 1))
 
     ~H"""
-    <div id={@id} class="rounded-box border border-base-300 p-4 space-y-3">
+    <div id={@id} class="panel space-y-4 p-5">
       <div>
         <h2 class="text-lg font-semibold">{@title}</h2>
         <p class="text-xs opacity-60">{@caption}</p>
@@ -268,7 +273,7 @@ defmodule IecWeb.MoversLive do
 
   defp local_swings(assigns) do
     ~H"""
-    <div id={@id} class="rounded-box border border-base-300 p-4 space-y-3">
+    <div id={@id} class="panel space-y-4 p-5">
       <h2 class="text-lg font-semibold">{@title}</h2>
       <p :if={@rows == []} class="text-sm opacity-60">None so far.</p>
       <table :if={@rows != []} class="table table-sm">

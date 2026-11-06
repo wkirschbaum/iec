@@ -44,6 +44,8 @@ defmodule IecWeb.Layouts do
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
 
+  attr :active, :atom, default: nil, doc: "the page the navigation marks as current"
+
   attr :count_progress, :map,
     default: nil,
     doc: "national count progress from IecWeb.LiveUpdates, shown in the sticky footer"
@@ -62,23 +64,33 @@ defmodule IecWeb.Layouts do
     assigns = assign(assigns, :no_progress, @no_progress)
 
     ~H"""
-    <header class="navbar border-b border-base-300 px-4 sm:px-6 lg:px-8">
-      <div class="flex-1 flex items-center gap-4 sm:gap-6">
-        <.link navigate={~p"/"} class="font-semibold whitespace-nowrap">IEC results</.link>
-        <.link navigate={~p"/"} class="text-sm opacity-75 hover:opacity-100">National</.link>
-        <.link navigate={~p"/map"} class="text-sm opacity-75 hover:opacity-100">Map</.link>
-        <.link navigate={~p"/movers"} class="text-sm opacity-75 hover:opacity-100 whitespace-nowrap">
-          Winners &amp; losers
+    <header class="sticky top-0 z-30 border-b border-base-300 bg-base-100/85 backdrop-blur-xl">
+      <div class={[container(), "flex h-16 items-center gap-8"]}>
+        <.link navigate={~p"/"} class="flex shrink-0 items-center gap-3">
+          <span class="grid size-8 place-items-center rounded-lg bg-primary text-primary-content shadow-sm">
+            <.icon name="hero-check-micro" class="size-5" />
+          </span>
+          <span class="leading-tight">
+            <span class="block font-serif text-lg font-semibold tracking-tight">Results Desk</span>
+            <span class="block text-[0.62rem] uppercase tracking-[0.16em] text-base-content/55">
+              South Africa · Local {Iec.Results.live_year()}
+            </span>
+          </span>
         </.link>
-        <.link navigate={~p"/changes"} class="text-sm opacity-75 hover:opacity-100">Changes</.link>
-      </div>
-      <div class="flex-none flex items-center gap-4">
-        <.theme_toggle />
+        <nav class="hidden items-center gap-1 text-sm md:flex">
+          <.nav_link :for={{label, path, page} <- nav_items()} path={path} active={@active == page}>
+            {label}
+          </.nav_link>
+        </nav>
+        <div class="ml-auto"><.theme_toggle /></div>
       </div>
     </header>
 
-    <main class={["px-4 py-8 sm:px-6 lg:px-8", (@count_progress || @feed_status) && "pb-28"]}>
-      <div class="mx-auto max-w-6xl space-y-8">
+    <main class={[
+      "py-8 sm:py-10",
+      (@count_progress || @feed_status) && "pb-44 md:pb-32"
+    ]}>
+      <div class={[container(), "space-y-12"]}>
         {render_slot(@inner_block)}
       </div>
     </main>
@@ -87,6 +99,7 @@ defmodule IecWeb.Layouts do
       :if={@count_progress || @feed_status}
       progress={@count_progress || @no_progress}
       feed_status={@feed_status}
+      active={@active}
     />
 
     <.flash_group flash={@flash} />
@@ -95,6 +108,7 @@ defmodule IecWeb.Layouts do
 
   attr :progress, :map, required: true
   attr :feed_status, :map, default: nil
+  attr :active, :atom, default: nil
 
   # The sticky count footer: a bar that grows as voting districts report (set slightly
   # below the footer's top border), the headline percentage, rings for the other counters
@@ -112,7 +126,7 @@ defmodule IecWeb.Layouts do
     ~H"""
     <footer
       id="count-footer"
-      class="fixed inset-x-0 bottom-0 z-40 border-t border-base-300 bg-base-100/80 backdrop-blur-xl"
+      class="fixed inset-x-0 bottom-0 z-40 border-t border-base-300 bg-base-100/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl"
     >
       <div class="pt-1.5">
         <div class="h-1 w-full bg-base-300/50">
@@ -126,14 +140,12 @@ defmodule IecWeb.Layouts do
         </div>
       </div>
 
-      <div class="mx-auto flex max-w-6xl items-center gap-6 px-4 py-2.5 sm:px-6 lg:px-8">
+      <div class={[container(), "flex items-center gap-6 py-2 md:py-2.5"]}>
         <div class="flex items-baseline gap-2">
-          <span class="text-3xl font-bold tabular-nums tracking-tight text-primary">
+          <span class="font-serif text-2xl font-semibold tabular-nums tracking-tight text-primary md:text-3xl">
             {:erlang.float_to_binary(@percentage, decimals: 1)}%
           </span>
-          <span class="text-xs leading-tight uppercase tracking-widest opacity-60">
-            counted
-          </span>
+          <span class="eyebrow">counted</span>
         </div>
 
         <div class="hidden items-center gap-5 md:flex">
@@ -172,8 +184,33 @@ defmodule IecWeb.Layouts do
           </div>
         </div>
       </div>
+
+      <%!-- On phones the navigation sits here, within thumb reach. --%>
+      <nav class="grid grid-cols-4 border-t border-base-300 md:hidden" aria-label="Sections">
+        <.link
+          :for={{label, path, page, icon} <- tab_items()}
+          navigate={path}
+          class={[
+            "flex flex-col items-center gap-0.5 py-2 text-[0.68rem] font-medium transition-colors active:scale-95",
+            @active == page && "text-primary",
+            @active != page && "text-base-content/60"
+          ]}
+        >
+          <.icon name={icon} class="size-5" />
+          {label}
+        </.link>
+      </nav>
     </footer>
     """
+  end
+
+  defp tab_items do
+    [
+      {"Overview", ~p"/", :national, "hero-home"},
+      {"Map", ~p"/map", :map, "hero-map"},
+      {"Movers", ~p"/movers", :movers, "hero-arrows-up-down"},
+      {"Changes", ~p"/changes", :changes, "hero-bolt"}
+    ]
   end
 
   attr :label, :string, required: true
@@ -230,6 +267,37 @@ defmodule IecWeb.Layouts do
         </span>
       </span>
     </div>
+    """
+  end
+
+  # Header, page and footer share one container, so their left edges line up.
+  defp container, do: "mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8"
+
+  defp nav_items do
+    [
+      {"Overview", ~p"/", :national},
+      {"Map", ~p"/map", :map},
+      {"Winners & losers", ~p"/movers", :movers},
+      {"Changes", ~p"/changes", :changes}
+    ]
+  end
+
+  attr :path, :string, required: true
+  attr :active, :boolean, default: false
+  slot :inner_block, required: true
+
+  defp nav_link(assigns) do
+    ~H"""
+    <.link
+      navigate={@path}
+      class={[
+        "whitespace-nowrap rounded-full px-3 py-1.5 transition-colors",
+        @active && "bg-base-content text-base-100 font-medium",
+        !@active && "text-base-content/70 hover:bg-base-200 hover:text-base-content"
+      ]}
+    >
+      {render_slot(@inner_block)}
+    </.link>
     """
   end
 

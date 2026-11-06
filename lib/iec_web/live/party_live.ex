@@ -2,9 +2,10 @@ defmodule IecWeb.PartyLive do
   use IecWeb, :live_view
 
   import IecWeb.ResultsComponents
+  import IecWeb.DesignComponents
 
   alias Iec.{Parties, Results}
-  alias IecWeb.PartySummary
+  alias IecWeb.{Narrative, PartySummary}
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
@@ -46,6 +47,12 @@ defmodule IecWeb.PartyLive do
     assign(socket,
       page_title: party_abbreviation(parties, %{party_id: party_id}),
       stats: summary.stats,
+      lede:
+        Narrative.party(
+          summary.stats,
+          party_abbreviation(parties, %{party_id: party_id}),
+          socket.assigns.previous_year
+        ),
       breakdowns: summary.breakdowns,
       province_rows: summary.provinces,
       section_rows: summary.section_rows,
@@ -76,21 +83,21 @@ defmodule IecWeb.PartyLive do
 
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div>
-        <h1 class="text-2xl font-semibold flex items-center gap-3">
-          <span
-            class="inline-block size-4 rounded-full"
-            style={"background-color: #{party_colour(@parties, %{party_id: @party_id})}"}
-          />
-          {party_abbreviation(@parties, %{party_id: @party_id})}
-        </h1>
-        <p :if={@parties[@party_id]} class="opacity-75">{@parties[@party_id].name}</p>
-      </div>
+      <.page_header
+        accent={party_colour(@parties, %{party_id: @party_id})}
+        eyebrow={(@parties[@party_id] && @parties[@party_id].name) || "Party"}
+        title={party_abbreviation(@parties, %{party_id: @party_id})}
+      >
+        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
+        <:lede :if={@lede}>{@lede}</:lede>
+      </.page_header>
 
       <.stats stats={@stats} previous_year={@previous_year} />
 
       <section id="at-a-glance" class="space-y-4">
-        <h2 class="text-xl font-semibold">At a glance</h2>
+        <.section_heading title="At a glance">
+          <:subtitle>Who it lost to, who it gained from, and where</:subtitle>
+        </.section_heading>
         <div class="grid gap-4 lg:grid-cols-2">
           <.breakdown_card
             id="wards-lost-to"
@@ -123,11 +130,15 @@ defmodule IecWeb.PartyLive do
           />
         </div>
 
-        <.province_table :if={@province_rows != []} rows={@province_rows} sorts={@sorts} />
+        <div :if={@province_rows != []} class="panel p-2 sm:p-4">
+          <.province_table rows={@province_rows} sorts={@sorts} />
+        </div>
       </section>
 
       <section class="space-y-6">
-        <h2 class="text-xl font-semibold">Councils</h2>
+        <.section_heading title="Councils">
+          <:subtitle>Council majorities against {@previous_year}</:subtitle>
+        </.section_heading>
         <.council_section
           :for={view <- @council_sections}
           section={view.section}
@@ -142,7 +153,9 @@ defmodule IecWeb.PartyLive do
       </section>
 
       <section class="space-y-6">
-        <h2 class="text-xl font-semibold">Wards</h2>
+        <.section_heading title="Wards">
+          <:subtitle>Ward seats against {@previous_year}</:subtitle>
+        </.section_heading>
         <p :if={not @has_wards} class="opacity-60">
           No ward results yet. The party file is fetched when the page opens.
         </p>
@@ -179,50 +192,36 @@ defmodule IecWeb.PartyLive do
 
   defp stats(assigns) do
     ~H"""
-    <section id="party-stats" class="grid gap-4 grid-cols-2 lg:grid-cols-4">
-      <.stat label="Votes" value={format_number(@stats.votes)}>
+    <section id="party-stats" class="panel grid grid-cols-2 gap-x-6 gap-y-7 p-5 sm:p-7 lg:grid-cols-4">
+      <.kpi label="Votes" value={format_number(@stats.votes)}>
         {@previous_year}: {format_number(@stats.previous_votes)}
-      </.stat>
-      <.stat label="Share" value={format_percentage(@stats.share)}>
+      </.kpi>
+      <.kpi label="Share" value={format_percentage(@stats.share)}>
         <span class={delta_class(@stats.swing)}>{format_delta(@stats.swing, :points)} pp</span>
         vs {format_percentage(@stats.previous_share)}
-      </.stat>
-      <.stat label="Seats" value={format_number(@stats.seats)}>
+      </.kpi>
+      <.kpi label="Seats" value={format_number(@stats.seats)}>
         {@previous_year}: {format_number(@stats.previous_seats)}
-      </.stat>
-      <.stat label="Ward seats" value={format_number(@stats.ward_seats)}>
+      </.kpi>
+      <.kpi label="Ward seats" value={format_number(@stats.ward_seats)}>
         {@previous_year}: {format_number(@stats.previous_ward_seats)}
-      </.stat>
-      <.stat label="Majority councils" value={format_number(@stats.majorities)}>
+      </.kpi>
+      <.kpi label="Majority councils" value={format_number(@stats.majorities)}>
         {@previous_year}: {format_number(@stats.previous_majorities)}
-      </.stat>
-      <.stat
+      </.kpi>
+      <.kpi
         label="Councils gained / lost"
         value={"#{@stats.councils_gained} / #{@stats.councils_lost}"}
       >
         {@stats.councils_kept} kept · {@stats.councils_pending} counting
-      </.stat>
-      <.stat label="Wards gained / lost" value={"#{@stats.wards_gained} / #{@stats.wards_lost}"}>
+      </.kpi>
+      <.kpi label="Wards gained / lost" value={"#{@stats.wards_gained} / #{@stats.wards_lost}"}>
         {@stats.wards_held} held · {@stats.wards_won_new} new or redrawn · {@stats.wards_pending} not declared
-      </.stat>
-      <.stat label="Wards contested" value={format_number(@stats.wards_contested)}>
+      </.kpi>
+      <.kpi label="Wards contested" value={format_number(@stats.wards_contested)}>
         in {@stats.municipalities_contested} municipalities
-      </.stat>
+      </.kpi>
     </section>
-    """
-  end
-
-  attr :label, :string, required: true
-  attr :value, :string, required: true
-  slot :inner_block
-
-  defp stat(assigns) do
-    ~H"""
-    <div class="rounded-box border border-base-300 p-4">
-      <div class="text-sm opacity-60">{@label}</div>
-      <div class="text-2xl tabular-nums">{@value}</div>
-      <div class="text-sm opacity-75 tabular-nums">{render_slot(@inner_block)}</div>
-    </div>
     """
   end
 
@@ -236,7 +235,7 @@ defmodule IecWeb.PartyLive do
   # A stacked bar of where the wards or councils went (or came from), with a legend.
   defp breakdown_card(assigns) do
     ~H"""
-    <div id={@id} class="rounded-box border border-base-300 p-4 space-y-3">
+    <div id={@id} class="panel space-y-3 p-5">
       <div class="flex items-baseline justify-between">
         <h3 class="font-medium">{@title}</h3>
         <span class="text-2xl tabular-nums">{@total}</span>
@@ -348,7 +347,7 @@ defmodule IecWeb.PartyLive do
 
   defp council_section(assigns) do
     ~H"""
-    <section id={@section.id}>
+    <section id={@section.id} class="panel px-4 py-3">
       <.section_toggle id={@section.id} title={@section.title} count={@total} open={@open} />
       <div :if={@open and @total > 0} class="overflow-x-auto mt-2">
         <table class="table table-sm">
@@ -426,7 +425,7 @@ defmodule IecWeb.PartyLive do
 
   defp ward_section(assigns) do
     ~H"""
-    <section id={@section.id}>
+    <section id={@section.id} class="panel px-4 py-3">
       <.section_toggle id={@section.id} title={@section.title} count={@total} open={@open} />
       <div :if={@open and @total > 0} class="overflow-x-auto mt-2">
         <table class="table table-sm">
