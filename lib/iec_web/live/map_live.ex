@@ -41,6 +41,8 @@ defmodule IecWeb.MapLive do
   def refresh(socket), do: socket
 
   defp level_atom(level), do: Map.fetch!(@level_atoms, level)
+  defp mode_atom("flips"), do: :flips
+  defp mode_atom(_leader), do: :leader
 
   defp map_path(socket_assigns, changes) do
     params =
@@ -80,7 +82,7 @@ defmodule IecWeb.MapLive do
             <.link
               :for={{label, mode} <- @modes}
               patch={map_path(assigns, mode: mode)}
-              class={["btn btn-sm join-item", @mode == mode && "btn-active"]}
+              class={["btn btn-sm join-item", @mode == mode && "btn-primary"]}
             >
               {label}
             </.link>
@@ -108,7 +110,7 @@ defmodule IecWeb.MapLive do
         module={IecWeb.MapComponent}
         id="map"
         level={level_atom(@level)}
-        mode={String.to_existing_atom(@mode)}
+        mode={mode_atom(@mode)}
         province_id={@province_id}
         parties={@parties}
         refreshed_at={@refreshed_at}

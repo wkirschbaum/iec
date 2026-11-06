@@ -195,13 +195,13 @@ defmodule IecWeb.MapComponent do
 
     ~H"""
     <div id={@id} class="space-y-3">
-      <div class="relative">
+      <div class="relative overflow-hidden rounded-box border border-base-300 bg-base-100">
         <svg
           viewBox={@view_box}
-          class="h-auto max-h-[70vh] w-full"
+          class="h-auto max-h-[70vh] w-full touch-none select-none"
           role="img"
           aria-label="Election map"
-          phx-hook=".MapTooltip"
+          phx-hook=".ElectionMap"
           id={"#{@id}-svg"}
         >
           <defs>
@@ -217,80 +217,183 @@ defmodule IecWeb.MapComponent do
               <rect width={@hatch_size / 2} height={@hatch_size} fill={colour} />
             </pattern>
           </defs>
-          <g
-            id={"#{@id}-areas"}
-            phx-update="stream"
-            class="[&_path]:cursor-pointer [&_path]:stroke-base-100 [&_path]:[stroke-width:0.6] [&_path]:[vector-effect:non-scaling-stroke] [&_path]:transition-[fill-opacity] [&_path]:duration-700 [&_path:hover]:brightness-110 [&_path:hover]:stroke-base-content"
-          >
-            <path
-              :for={{dom_id, area} <- @streams.areas}
-              id={dom_id}
-              d={area.path}
-              fill={fill(area, @id)}
-              fill-opacity={area.opacity}
-              data-tip={area.title}
-              data-href={area.href}
-            />
+          <%!-- The hook pans and zooms by setting this group's transform. --%>
+          <g id={"#{@id}-viewport"} phx-mounted={JS.ignore_attributes(["transform"])}>
+            <g
+              id={"#{@id}-areas"}
+              phx-update="stream"
+              class="[&_path]:cursor-pointer [&_path]:stroke-base-100 [&_path]:[stroke-width:0.6] [&_path]:[vector-effect:non-scaling-stroke] [&_path]:transition-[fill-opacity] [&_path]:duration-700 [&_path:hover]:brightness-110 [&_path:hover]:stroke-base-content"
+            >
+              <path
+                :for={{dom_id, area} <- @streams.areas}
+                id={dom_id}
+                d={area.path}
+                fill={fill(area, @id)}
+                fill-opacity={area.opacity}
+                data-tip={area.title}
+                data-href={area.href}
+              />
+            </g>
           </g>
         </svg>
+
+        <div class="absolute right-2 top-2 flex flex-col overflow-hidden rounded-box border border-base-300 bg-base-100/90 shadow-sm backdrop-blur">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-square rounded-none"
+            aria-label="Zoom in"
+            phx-click={JS.dispatch("map:zoom", to: "##{@id}-svg", detail: %{by: 1.6})}
+          >
+            <.icon name="hero-plus-micro" class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-square rounded-none border-t border-base-300"
+            aria-label="Zoom out"
+            phx-click={JS.dispatch("map:zoom", to: "##{@id}-svg", detail: %{by: 1 / 1.6})}
+          >
+            <.icon name="hero-minus-micro" class="size-4" />
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-square rounded-none border-t border-base-300"
+            aria-label="Show everything"
+            phx-click={JS.dispatch("map:reset", to: "##{@id}-svg")}
+          >
+            <.icon name="hero-arrows-pointing-out-micro" class="size-4" />
+          </button>
+        </div>
+
+        <p class="pointer-events-none absolute bottom-2 left-3 text-xs opacity-50">
+          Scroll or pinch to zoom · drag to move · click to open
+        </p>
+
         <div
           id={"#{@id}-tooltip"}
-          class="pointer-events-none absolute z-10 hidden rounded-box border border-base-300 bg-base-100/95 px-3 py-1.5 text-sm shadow-lg backdrop-blur"
+          class="pointer-events-none absolute z-10 hidden max-w-xs rounded-box border border-base-300 bg-base-100/95 px-3 py-1.5 text-sm shadow-lg backdrop-blur"
         />
       </div>
 
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span :for={{party_id, count} <- @summary.parties} class="inline-flex items-center gap-1.5">
-          <span
-            class="inline-block size-3 rounded-sm"
-            style={"background-color: #{party_colour(@parties, %{party_id: party_id})}"}
-          />
-          {party_abbreviation(@parties, %{party_id: party_id})}
-          <span class="tabular-nums opacity-60">{count}</span>
-        </span>
-        <span class="ml-auto inline-flex items-center gap-3 text-xs opacity-70">
-          <span :if={@mode == :leader} class="inline-flex items-center gap-1">
-            <span class="inline-flex h-3">
-              <span
-                :for={{_floor, opacity} <- Enum.reverse(share_bands())}
-                class="inline-block w-2 bg-base-content"
-                style={"opacity: #{opacity}"}
-              />
-            </span>
-            stronger lead
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <span class="inline-block size-3 rounded-sm bg-[repeating-linear-gradient(45deg,currentColor_0_2px,transparent_2px_4px)]" />
-            counting
-          </span>
-          <span class="inline-flex items-center gap-1">
-            <span class="inline-block size-3 rounded-sm bg-base-300" /> no results
-          </span>
-          <span class="tabular-nums">{@summary.complete}/{@summary.total} final</span>
-        </span>
-      </div>
+      <.legend summary={@summary} mode={@mode} parties={@parties} />
 
-      <script :type={Phoenix.LiveView.ColocatedHook} name=".MapTooltip">
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".ElectionMap">
+        // Pan and zoom by transforming the viewport group (the server owns the viewBox),
+        // a tooltip that follows the pointer, and click-through that ignores drags.
         export default {
           mounted() {
-            const tooltip = document.getElementById(this.el.id.replace(/-svg$/, "-tooltip"))
-            const box = this.el.parentElement
+            this.viewport = this.el.querySelector("g[id$='-viewport']")
+            this.tooltip = document.getElementById(this.el.id.replace(/-svg$/, "-tooltip"))
+            this.viewBox = this.el.getAttribute("viewBox")
+            this.pointers = new Map()
+            this.reset()
+
+            this.el.addEventListener("wheel", (event) => {
+              event.preventDefault()
+              this.zoomAt(this.point(event), Math.exp(-event.deltaY * 0.0015))
+            }, {passive: false})
+
+            this.el.addEventListener("pointerdown", (event) => {
+              this.el.setPointerCapture(event.pointerId)
+              this.pointers.set(event.pointerId, this.point(event))
+              this.moved = 0
+            })
 
             this.el.addEventListener("pointermove", (event) => {
-              const tip = event.target.dataset && event.target.dataset.tip
-              if (!tip) { tooltip.classList.add("hidden"); return }
-              const bounds = box.getBoundingClientRect()
-              tooltip.textContent = tip
-              tooltip.classList.remove("hidden")
-              const left = Math.min(event.clientX - bounds.left + 14, bounds.width - tooltip.offsetWidth - 4)
-              tooltip.style.left = `${Math.max(left, 4)}px`
-              tooltip.style.top = `${event.clientY - bounds.top + 14}px`
+              if (this.pointers.has(event.pointerId)) {
+                const previous = this.pointers.get(event.pointerId)
+                const current = this.point(event)
+
+                if (this.pointers.size === 2) {
+                  const [other] = [...this.pointers].filter(([id]) => id !== event.pointerId).map(([, p]) => p)
+                  const before = Math.hypot(previous.x - other.x, previous.y - other.y)
+                  const after = Math.hypot(current.x - other.x, current.y - other.y)
+                  if (before > 0) this.zoomAt({x: (current.x + other.x) / 2, y: (current.y + other.y) / 2}, after / before)
+                } else {
+                  this.panBy(current.x - previous.x, current.y - previous.y)
+                }
+
+                this.moved += Math.hypot(current.x - previous.x, current.y - previous.y)
+                this.pointers.set(event.pointerId, this.point(event))
+                this.tooltip.classList.add("hidden")
+                return
+              }
+              this.showTooltip(event)
             })
-            this.el.addEventListener("pointerleave", () => tooltip.classList.add("hidden"))
+
+            const release = (event) => this.pointers.delete(event.pointerId)
+            this.el.addEventListener("pointerup", release)
+            this.el.addEventListener("pointercancel", release)
+            this.el.addEventListener("pointerleave", () => this.tooltip.classList.add("hidden"))
+
             this.el.addEventListener("click", (event) => {
               const href = event.target.dataset && event.target.dataset.href
-              if (href) this.js().navigate(href)
+              if (href && this.moved < this.dragThreshold()) this.js().navigate(href)
             })
+
+            this.el.addEventListener("map:zoom", (event) => {
+              const box = this.el.viewBox.baseVal
+              this.zoomAt({x: box.x + box.width / 2, y: box.y + box.height / 2}, event.detail.by)
+            })
+            this.el.addEventListener("map:reset", () => this.reset())
+          },
+
+          // A new area was framed (another province, level or municipality): start over.
+          updated() {
+            if (this.el.getAttribute("viewBox") !== this.viewBox) {
+              this.viewBox = this.el.getAttribute("viewBox")
+              this.reset()
+            }
+          },
+
+          // Pointer position in viewBox units, before the viewport transform.
+          point(event) {
+            const point = this.el.createSVGPoint()
+            point.x = event.clientX
+            point.y = event.clientY
+            return point.matrixTransform(this.el.getScreenCTM().inverse())
+          },
+
+          dragThreshold() {
+            return this.el.viewBox.baseVal.width / 150
+          },
+
+          reset() {
+            this.scale = 1
+            this.x = 0
+            this.y = 0
+            this.apply()
+          },
+
+          zoomAt(point, factor) {
+            const scale = Math.min(Math.max(this.scale * factor, 1), 60)
+            const ratio = scale / this.scale
+            this.x = point.x - (point.x - this.x) * ratio
+            this.y = point.y - (point.y - this.y) * ratio
+            this.scale = scale
+            if (scale === 1) { this.x = 0; this.y = 0 }
+            this.apply()
+          },
+
+          panBy(dx, dy) {
+            if (this.scale === 1) return
+            this.x += dx
+            this.y += dy
+            this.apply()
+          },
+
+          apply() {
+            this.viewport.setAttribute("transform", `translate(${this.x} ${this.y}) scale(${this.scale})`)
+          },
+
+          showTooltip(event) {
+            const tip = event.target.dataset && event.target.dataset.tip
+            if (!tip) { this.tooltip.classList.add("hidden"); return }
+            const bounds = this.el.parentElement.getBoundingClientRect()
+            this.tooltip.textContent = tip
+            this.tooltip.classList.remove("hidden")
+            const left = Math.min(event.clientX - bounds.left + 14, bounds.width - this.tooltip.offsetWidth - 4)
+            this.tooltip.style.left = `${Math.max(left, 4)}px`
+            this.tooltip.style.top = `${event.clientY - bounds.top + 14}px`
           }
         }
       </script>
@@ -298,5 +401,70 @@ defmodule IecWeb.MapComponent do
     """
   end
 
-  defp share_bands, do: @share_bands
+  attr :summary, :map, required: true
+  attr :mode, :atom, required: true
+  attr :parties, :map, required: true
+
+  defp legend(assigns) do
+    ~H"""
+    <div class="grid gap-4 rounded-box border border-base-300 p-4 text-sm sm:grid-cols-[1fr_auto]">
+      <div class="space-y-2">
+        <div class="text-xs font-medium uppercase tracking-wider opacity-60">
+          {if @mode == :flips,
+            do: "New leader since #{Iec.Results.previous_year()}",
+            else: "Leading party"}
+        </div>
+        <p :if={@summary.parties == []} class="opacity-60">None yet.</p>
+        <div class="flex flex-wrap gap-x-4 gap-y-1.5">
+          <span :for={{party_id, count} <- @summary.parties} class="inline-flex items-center gap-1.5">
+            <span
+              class="inline-block size-3.5 rounded-sm"
+              style={"background-color: #{party_colour(@parties, %{party_id: party_id})}"}
+            />
+            {party_abbreviation(@parties, %{party_id: party_id})}
+            <span class="tabular-nums opacity-60">{count}</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="space-y-2 sm:min-w-64">
+        <div :if={@mode == :leader} class="space-y-1">
+          <div class="text-xs font-medium uppercase tracking-wider opacity-60">Leader's share</div>
+          <div class="flex">
+            <div :for={{label, opacity} <- share_legend()} class="flex-1 text-center">
+              <div class="h-2.5 bg-base-content first:rounded-l" style={"opacity: #{opacity}"} />
+              <div class="mt-0.5 text-xs tabular-nums opacity-70">{label}</div>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="inline-block size-3.5 rounded-sm border border-base-300 bg-[repeating-linear-gradient(45deg,currentColor_0_2px,transparent_2px_5px)] opacity-70" />
+            counting
+          </span>
+          <span :if={@mode == :flips} class="inline-flex items-center gap-1.5">
+            <span class="inline-block size-3.5 rounded-sm border border-base-300 bg-base-200" />
+            same leader
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="inline-block size-3.5 rounded-sm bg-base-300" /> no results yet
+          </span>
+        </div>
+        <div class="text-xs tabular-nums opacity-70">
+          {@summary.reporting} of {@summary.total} reporting · {@summary.complete} final
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp share_legend do
+    @share_bands
+    |> Enum.reverse()
+    |> Enum.map(fn
+      {0, opacity} -> {"<40%", opacity}
+      {70, opacity} -> {"70%+", opacity}
+      {floor, opacity} -> {"#{floor}%", opacity}
+    end)
+  end
 end
