@@ -49,6 +49,32 @@ defmodule Iec.Maps.Geometry do
     end
   end
 
+  @doc """
+  The area of a GeoJSON polygon or multipolygon in square map units (holes subtracted),
+  measured before simplification.
+  """
+  def area(%{"type" => "Polygon", "coordinates" => rings}), do: polygon_area(rings)
+
+  def area(%{"type" => "MultiPolygon", "coordinates" => polygons}),
+    do: polygons |> Enum.map(&polygon_area/1) |> Enum.sum()
+
+  def area(_geometry), do: 0
+
+  defp polygon_area([outer | holes]) do
+    ring_area = fn ring -> ring |> Enum.map(&project/1) |> shoelace() end
+    max(ring_area.(outer) - (holes |> Enum.map(ring_area) |> Enum.sum()), 0)
+  end
+
+  defp polygon_area([]), do: 0
+
+  defp shoelace(points) do
+    points
+    |> Enum.zip(tl(points) ++ [hd(points)])
+    |> Enum.reduce(0, fn {{x1, y1}, {x2, y2}}, sum -> sum + x1 * y2 - x2 * y1 end)
+    |> abs()
+    |> div(2)
+  end
+
   defp project([longitude, latitude | _altitude]) do
     {round((longitude - @west) * @longitude_scale * @units_per_degree),
      round((@north - latitude) * @units_per_degree)}

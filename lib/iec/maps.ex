@@ -25,30 +25,60 @@ defmodule Iec.Maps do
     ward: {"nationalWard", 1}
   ]
 
+  # Coarser ward outlines for showing every ward in the country at once.
+  @overview_tolerance 4
+
   ## Importing
 
   @doc """
-  Imports the outlines of every level not stored yet. The ward file is about 40 MB, so
-  this takes a minute the first time; after that it does nothing.
+  Imports every outline set not stored yet (the live election's provinces, municipalities
+  and wards, and the previous election's wards), then marks the wards redrawn since the
+  previous election. The ward files are about 40 MB each, so the first run takes a
+  minute; after that it does nothing.
   """
   def import_boundaries do
-    for {level, {file, tolerance}} <- @boundary_files,
-        not Repo.exists?(from boundary in Boundary, where: boundary.level == ^level) do
-      url = Feed.map_url(Feed.live_election(), file)
+    live = Feed.live_election()
+    previous = Feed.previous_election()
+
+    sets =
+      for {level, file_and_tolerance} <- @boundary_files,
+          do: {live, level, file_and_tolerance}
+
+    for {election, level, {file, tolerance}} <- sets ++ [{previous, :ward, {"nationalWard", 2}}],
+        not imported?(election.year, level) do
+      url = Feed.map_url(election, file)
 
       case Feed.get(url, %{etag: nil, last_modified: nil}, receive_timeout: :timer.minutes(3)) do
         {:ok, %{"features" => features}, _body, _cache} ->
-          insert_boundaries(level, features, tolerance)
+          Repo.delete_all(
+            from boundary in Boundary,
+              where: boundary.election == ^election.year and boundary.level == ^level
+          )
+
+          insert_boundaries(election.year, level, features, tolerance)
 
         other ->
           Logger.warning("Map outlines: #{url} failed (#{inspect(other)})")
       end
     end
 
-    :ok
+    mark_redrawn_wards(live.year, previous.year)
   end
 
-  defp insert_boundaries(level, features, tolerance) do
+  # Stored and complete: wards of the live election also need their overview outline.
+  defp imported?(year, level) do
+    Boundary
+    |> where([boundary], boundary.election == ^year and boundary.level == ^level)
+    |> where([boundary], not is_nil(boundary.area))
+    |> then(fn query ->
+      if level == :ward and year == Results.live_year(),
+        do: where(query, [boundary], not is_nil(boundary.overview_path)),
+        else: query
+    end)
+    |> Repo.exists?()
+  end
+
+  defp insert_boundaries(year, level, features, tolerance) do
     now = DateTime.utc_now()
     municipality_ids = municipality_ids_by_name()
 
@@ -59,10 +89,21 @@ defmodule Iec.Maps do
           []
 
         {path, {min_x, min_y, max_x, max_y}} ->
+          overview =
+            if level == :ward,
+              do:
+                with(
+                  {overview, _box} <- Geometry.to_svg(geometry, @overview_tolerance),
+                  do: overview
+                )
+
           [
             Map.merge(area_attributes(level, properties, municipality_ids), %{
+              election: year,
               level: level,
               path: path,
+              overview_path: overview,
+              area: Geometry.area(geometry),
               min_x: min_x,
               min_y: min_y,
               max_x: max_x,
@@ -77,11 +118,78 @@ defmodule Iec.Maps do
     |> Enum.each(&Repo.insert_all(Boundary, &1, on_conflict: :nothing))
   end
 
+  # A ward counts as redrawn when the previous election's ward with its id covers a
+  # clearly different area: its area changed by more than about a fifth, or the two
+  # bounding boxes overlap by less than 75%. Smaller edits still count as the same ward.
+  defp mark_redrawn_wards(live_year, previous_year) do
+    previous =
+      Repo.all(
+        from boundary in Boundary,
+          where: boundary.election == ^previous_year and boundary.level == :ward
+      )
+      |> Map.new(&{&1.area_id, &1})
+
+    redrawn =
+      for ward <-
+            Repo.all(
+              from boundary in Boundary,
+                where: boundary.election == ^live_year and boundary.level == :ward
+            ),
+          before = previous[ward.area_id],
+          before != nil and reshaped?(ward, before),
+          do: ward.area_id
+
+    Repo.update_all(
+      from(boundary in Boundary,
+        where: boundary.election == ^live_year and boundary.level == :ward
+      ),
+      set: [redrawn: false]
+    )
+
+    Repo.update_all(
+      from(boundary in Boundary,
+        where:
+          boundary.election == ^live_year and boundary.level == :ward and
+            boundary.area_id in ^redrawn
+      ),
+      set: [redrawn: true]
+    )
+
+    :ok
+  end
+
+  defp reshaped?(ward, before) do
+    area_ratio = if before.area > 0, do: ward.area / before.area, else: 0
+    area_ratio < 0.8 or area_ratio > 1.25 or box_overlap(ward, before) < 0.75
+  end
+
+  # Intersection over union of two bounding boxes.
+  defp box_overlap(first, second) do
+    width = min(first.max_x, second.max_x) - max(first.min_x, second.min_x)
+    height = min(first.max_y, second.max_y) - max(first.min_y, second.min_y)
+    intersection = max(width, 0) * max(height, 0)
+    box_area = fn box -> (box.max_x - box.min_x) * (box.max_y - box.min_y) end
+    union = box_area.(first) + box_area.(second) - intersection
+    if union > 0, do: intersection / union, else: 0
+  end
+
+  @doc "Ids of the live election's wards whose outline changed since the previous election."
+  def list_redrawn_ward_ids do
+    Repo.all(
+      from boundary in Boundary,
+        where:
+          boundary.election == ^Results.live_year() and boundary.level == :ward and
+            boundary.redrawn,
+        select: boundary.area_id
+    )
+    |> MapSet.new()
+  end
+
   # The national ward file names each ward's municipality but leaves out its id.
   defp municipality_ids_by_name do
     Repo.all(
       from boundary in Boundary,
-        where: boundary.level == :municipality,
+        where: boundary.level == :municipality and boundary.election == ^Results.live_year(),
         select: {boundary.name, boundary.area_id}
     )
     |> Map.new()
@@ -122,7 +230,7 @@ defmodule Iec.Maps do
   """
   def list_boundaries(level, filters \\ []) do
     Boundary
-    |> where([boundary], boundary.level == ^level)
+    |> where([boundary], boundary.level == ^level and boundary.election == ^Results.live_year())
     |> filter_boundaries(filters)
     |> order_by([boundary], boundary.area_id)
     |> Repo.all()
@@ -201,9 +309,11 @@ defmodule Iec.Maps do
     end
 
     previous = leaders.(Results.previous_year(), true)
+    redrawn = list_redrawn_ward_ids()
 
     for {ward_id, leader} <- leaders.(Results.live_year(), false), into: %{} do
-      previous_leader = previous[ward_id]
+      # A redrawn ward has no like-for-like previous leader.
+      previous_leader = if ward_id in redrawn, do: nil, else: previous[ward_id]
 
       {ward_id,
        %{

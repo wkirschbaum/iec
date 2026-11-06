@@ -12,12 +12,17 @@ defmodule Iec.Parties do
 
   require Logger
 
-  alias Iec.Repo
-  alias Iec.Results
+  alias Iec.{Maps, Repo, Results}
   alias Iec.Results.{Feed, Fetch, Parser, PartyMunicipalityResult, PartyWardResult}
-  alias Iec.Results.{Poller, Snapshot, Ward}
+  alias Iec.Results.{FollowedParty, Poller, Snapshot, Ward}
 
   @topic "parties"
+
+  # Parties beyond the national list change little; their files are checked this often.
+  @minor_party_interval :timer.minutes(5)
+
+  # Pause between one-off downloads (municipality and previous-election files).
+  @pause 300
 
   @doc "Subscribes the caller to `{:party_results_changed, party_id}` and `:wards_mapped`."
   def subscribe, do: Phoenix.PubSub.subscribe(Iec.PubSub, @topic)
@@ -138,51 +143,79 @@ defmodule Iec.Parties do
   @doc "Announces that a party's rows changed."
   def broadcast_changed(party_id), do: broadcast({:party_results_changed, party_id})
 
-  ## Tracking
+  ## Following parties
 
   @doc """
-  Starts polling a party's live file, and imports its previous-election file if that
-  is not stored yet. Does nothing when polling is off (tests).
+  Adds parties to the followed set (every party standing anywhere ends up here, see
+  `import_municipality_files/0`) and starts following the new ones.
   """
-  def track_party(party_id) when is_integer(party_id) and party_id >= 0 do
-    if polling?() do
-      feed = Feed.party_feed(Feed.live_election(), party_id)
+  def follow_parties(party_ids) do
+    now = DateTime.utc_now()
+    rows = for id <- Enum.uniq(party_ids), id >= 0, do: %{party_id: id, inserted_at: now}
+    Repo.insert_all(FollowedParty, rows, on_conflict: :nothing)
+    track_followed_parties()
+  end
 
-      unless Poller.running?(feed.name) do
+  @doc "Every followed party's id."
+  def list_followed_party_ids, do: Repo.all(from party in FollowedParty, select: party.party_id)
+
+  @doc """
+  Starts a poller for each followed party (and each party on the national list) that has
+  none yet, and imports their previous-election files that are not stored. Parties on the
+  national list are polled as their files change; the rest every few minutes. Does
+  nothing when polling is off (tests, `mix iec.seed`).
+  """
+  def track_followed_parties do
+    if polling?() do
+      national = national_party_ids()
+
+      (national ++ list_followed_party_ids())
+      |> Enum.uniq()
+      |> Enum.reject(&Poller.running?(Feed.party_feed(Feed.live_election(), &1).name))
+      |> Enum.with_index()
+      |> Enum.each(fn {party_id, index} ->
         DynamicSupervisor.start_child(
           Iec.Parties.Pollers,
-          {Poller, feed: feed, initial_delay: :rand.uniform(:timer.seconds(3))}
+          {Poller,
+           feed: Feed.party_feed(Feed.live_election(), party_id),
+           initial_delay: :timer.seconds(1) * index,
+           minimum_interval: if(party_id in national, do: 0, else: @minor_party_interval)}
         )
-      end
+      end)
 
-      unless party_file_imported?(Feed.previous_election(), party_id) do
-        Task.Supervisor.start_child(Iec.TaskSupervisor, fn ->
-          import_previous_election(party_id)
-        end)
-      end
+      Task.Supervisor.start_child(Iec.TaskSupervisor, &import_previous_party_files/0)
     end
 
     :ok
   end
 
-  def track_party(_party_id), do: :ok
+  @doc "Adds every party on the latest national results list to the followed set."
+  def follow_national_parties, do: follow_parties(national_party_ids())
 
-  @doc "Tracks every party on the latest national results list."
-  def track_national_parties do
+  defp national_party_ids do
     case Results.get_latest_snapshot(:national, 0) do
-      nil -> :ok
-      national -> Enum.each(national.party_results, &track_party(&1.party_id))
+      nil -> []
+      national -> for party <- national.party_results, party.party_id >= 0, do: party.party_id
     end
   end
 
   defp polling?, do: Application.fetch_env!(:iec, Iec.Results)[:poll]
 
-  # Runs at most once at a time per party.
-  defp import_previous_election(party_id) do
-    feed = Feed.party_feed(Feed.previous_election(), party_id)
+  @doc """
+  Imports the previous-election file of every followed party not stored yet, one at a
+  time. Only one import runs at once.
+  """
+  def import_previous_party_files do
+    with {:ok, _owner} <- Registry.register(Iec.Results.Registry, :previous_party_files, nil) do
+      previous = Feed.previous_election()
 
-    with {:ok, _owner} <- Registry.register(Iec.Results.Registry, {:import, feed.name}, nil) do
-      import_party_file(Feed.previous_election(), party_id)
+      for party_id <- Enum.uniq(national_party_ids() ++ list_followed_party_ids()),
+          not party_file_imported?(previous, party_id) do
+        import_party_file(previous, party_id)
+        Process.sleep(@pause)
+      end
+
+      :ok
     end
   end
 
@@ -200,15 +233,7 @@ defmodule Iec.Parties do
         broadcast_changed(party_id)
 
       {:error, {:http_status, status}} when status in 400..499 ->
-        if election.year != Results.live_year() do
-          Repo.insert!(%Fetch{
-            election: feed.election,
-            feed: feed.name,
-            url: feed.url,
-            body_bytes: 0
-          })
-        end
-
+        if election.year != Results.live_year(), do: record_fetch(election, feed.name, feed.url)
         :no_file
 
       other ->
@@ -218,99 +243,174 @@ defmodule Iec.Parties do
   end
 
   @doc "True when an election's file for this party has been stored (or found missing)."
-  def party_file_imported?(election, party_id) do
-    name = "party-#{party_id}"
+  def party_file_imported?(election, party_id), do: fetched?(election.year, "party-#{party_id}")
 
-    Repo.exists?(
-      from fetch in Fetch, where: fetch.election == ^election.year and fetch.feed == ^name
-    )
-  end
+  ## Municipality files
 
   @doc """
-  Fills the ward directory from the live election's municipality files, skipping
-  municipalities already mapped. Each file is up to ~3 MB, so they are fetched one at a
-  time with a pause between them.
+  Reads each live-election municipality file once: maps its wards to the municipality and
+  follows every party standing in it. Files the IEC has not published yet (it answers
+  406) are retried on the next pass; `complete_municipality_files/0` keeps passing until
+  all are read. Waits for the province pollers on a fresh database.
   """
-  def import_ward_directory(attempts_left \\ 20) do
-    if attempts_left > 0 and not Repo.exists?(municipality_snapshots()) do
-      # Fresh database: wait for the province pollers to store the municipalities.
+  def import_municipality_files(attempts_left \\ 20) do
+    live = Feed.live_election()
+    municipality_ids = Map.keys(Results.list_area_names(:municipality))
+
+    if municipality_ids == [] and attempts_left > 0 do
       Process.sleep(:timer.seconds(15))
-      import_ward_directory(attempts_left - 1)
+      import_municipality_files(attempts_left - 1)
     else
-      map_unmapped_municipalities()
+      party_ids =
+        for municipality_id <- municipality_ids,
+            not fetched?(live.year, "munic-#{municipality_id}"),
+            data = fetch_municipality_file(live, municipality_id),
+            data != nil,
+            reduce: [] do
+          party_ids ->
+            insert_wards(municipality_id, data)
+            party_ids ++ standing_party_ids(data)
+        end
+
+      if party_ids != [] do
+        follow_parties(party_ids)
+        broadcast(:wards_mapped)
+      end
+
+      :ok
     end
   end
 
-  @doc """
-  Keeps filling the ward directory until every municipality is mapped: the IEC answers
-  406 for municipality files it has not published yet. Gives up after a few hours.
-  """
-  def complete_ward_directory(passes_left \\ 24) do
-    import_ward_directory()
+  @doc "Repeats `import_municipality_files/0` every 10 minutes until every file is read."
+  def complete_municipality_files(passes_left \\ 24) do
+    import_municipality_files()
 
-    if passes_left > 1 and unmapped_municipality_count() > 0 do
+    if passes_left > 1 and unread_municipality_files() > 0 do
       Process.sleep(:timer.minutes(10))
-      complete_ward_directory(passes_left - 1)
+      complete_municipality_files(passes_left - 1)
     else
       :ok
     end
   end
 
-  defp unmapped_municipality_count do
-    mapped = from ward in Ward, distinct: true, select: ward.municipality_id
+  defp unread_municipality_files do
+    year = Results.live_year()
 
-    municipality_snapshots()
-    |> where([snapshot], snapshot.area_id not in subquery(mapped))
-    |> select([snapshot], count(snapshot.area_id, :distinct))
-    |> Repo.one()
+    Results.list_area_names(:municipality)
+    |> Map.keys()
+    |> Enum.count(&(not fetched?(year, "munic-#{&1}")))
   end
 
-  defp municipality_snapshots do
-    from snapshot in Snapshot,
-      where: snapshot.election == ^Results.live_year() and snapshot.level == :municipality
-  end
-
-  defp map_unmapped_municipalities do
-    mapped = Repo.all(from ward in Ward, distinct: true, select: ward.municipality_id)
+  @doc """
+  Reads each previous-election municipality file once and stores every party's share of
+  every ward, marking the ward's winner (most votes; these files carry no seat flag). This
+  gives the previous holder of every ward, whichever party it was.
+  """
+  def import_previous_ward_results do
+    previous = Feed.previous_election()
 
     municipality_ids =
-      Repo.all(
-        from snapshot in Snapshot,
-          where:
-            snapshot.election == ^Results.live_year() and snapshot.level == :municipality and
-              snapshot.area_id not in ^mapped,
-          distinct: true,
-          select: snapshot.area_id
-      )
+      Enum.uniq(Map.keys(Results.list_area_names(:municipality)) ++ previous_municipality_ids())
 
-    for municipality_id <- municipality_ids do
-      url = Feed.municipality_url(Feed.live_election(), municipality_id)
-
-      case Feed.get(url) do
-        {:ok, data, _body, _cache} ->
-          now = DateTime.utc_now()
-
-          rows =
-            for ward <- data["WardResults"] || [] do
-              %{
-                id: ward["WardID"],
-                municipality_id: municipality_id,
-                ward_number: Ward.ward_number(ward["WardID"]),
-                inserted_at: now
-              }
-            end
-
-          Repo.insert_all(Ward, rows, on_conflict: :nothing)
-
-        other ->
-          Logger.warning("Ward directory: #{url} failed (#{inspect(other)})")
-      end
-
-      Process.sleep(500)
+    for municipality_id <- municipality_ids,
+        not fetched?(previous.year, "munic-#{municipality_id}"),
+        data = fetch_municipality_file(previous, municipality_id),
+        data != nil do
+      insert_previous_ward_results(previous.year, data)
     end
 
-    if municipality_ids != [], do: broadcast(:wards_mapped)
+    broadcast(:wards_mapped)
     :ok
+  end
+
+  defp previous_municipality_ids do
+    Repo.all(
+      from snapshot in Snapshot,
+        where: snapshot.election == ^Results.previous_year() and snapshot.level == :municipality,
+        distinct: true,
+        select: snapshot.area_id
+    )
+  end
+
+  # One municipality file (up to ~3 MB), fetched politely; recorded as read on success.
+  defp fetch_municipality_file(election, municipality_id) do
+    url = Feed.municipality_url(election, municipality_id)
+    Process.sleep(@pause)
+
+    case Feed.get(url) do
+      {:ok, data, _body, _cache} ->
+        record_fetch(election, "munic-#{municipality_id}", url)
+        data
+
+      other ->
+        Logger.warning("Municipality file #{url} failed (#{inspect(other)})")
+        nil
+    end
+  end
+
+  defp insert_wards(municipality_id, data) do
+    now = DateTime.utc_now()
+
+    rows =
+      for ward <- data["WardResults"] || [] do
+        %{
+          id: ward["WardID"],
+          municipality_id: municipality_id,
+          ward_number: Ward.ward_number(ward["WardID"]),
+          inserted_at: now
+        }
+      end
+
+    Repo.insert_all(Ward, rows, on_conflict: :nothing)
+  end
+
+  defp standing_party_ids(data) do
+    for ward <- data["WardResults"] || [],
+        party <- ward["PartyBallotResults"] || [],
+        is_integer(party["ID"]),
+        uniq: true,
+        do: party["ID"]
+  end
+
+  defp insert_previous_ward_results(year, data) do
+    now = DateTime.utc_now()
+
+    rows =
+      for ward <- data["WardResults"] || [],
+          parties = Enum.filter(ward["PartyBallotResults"] || [], &is_integer(&1["ID"])),
+          winner = Enum.max_by(parties, &(&1["TotalValidVotes"] || 0), fn -> nil end),
+          party <- parties do
+        won = party == winner and (party["TotalValidVotes"] || 0) > 0
+
+        %{
+          election: year,
+          party_id: party["ID"],
+          ward_id: ward["WardID"],
+          vote_percentage: party["PercOfVotes"] && party["PercOfVotes"] / 1,
+          won: won,
+          first_won_at: if(won, do: now),
+          inserted_at: now,
+          updated_at: now
+        }
+      end
+
+    rows
+    |> Enum.uniq_by(&{&1.party_id, &1.ward_id})
+    |> Enum.chunk_every(2_000)
+    |> Enum.each(
+      &Repo.insert_all(PartyWardResult, &1,
+        on_conflict: ward_conflict_update(),
+        conflict_target: [:election, :party_id, :ward_id]
+      )
+    )
+  end
+
+  defp fetched?(year, feed_name) do
+    Repo.exists?(from fetch in Fetch, where: fetch.election == ^year and fetch.feed == ^feed_name)
+  end
+
+  defp record_fetch(election, feed_name, url) do
+    Repo.insert!(%Fetch{election: election.year, feed: feed_name, url: url, body_bytes: 0})
   end
 
   ## Reading
@@ -405,6 +505,7 @@ defmodule Iec.Parties do
 
     holders = ward_holders(ward_ids)
     first_fetched_at = first_party_fetches(live_year)
+    redrawn = Maps.list_redrawn_ward_ids()
 
     existed =
       Repo.all(
@@ -428,9 +529,12 @@ defmodule Iec.Parties do
         declared_before_tracking: declared_before_tracking?(holder, first_fetched_at),
         previous_holder: previous_holder && previous_holder.party_id,
         previous_share: previous_holder && previous_holder.vote_percentage,
+        # A redrawn ward shows who held its old shape, but did not change hands as such.
         changed_hands:
-          holder != nil and previous_holder != nil and holder.party_id != previous_holder.party_id,
-        new_ward: not MapSet.member?(existed, ward_id)
+          holder != nil and previous_holder != nil and ward_id not in redrawn and
+            holder.party_id != previous_holder.party_id,
+        new_ward: not MapSet.member?(existed, ward_id),
+        redrawn: ward_id in redrawn
       }
     end
   end
@@ -499,16 +603,23 @@ defmodule Iec.Parties do
       )
       |> Map.new(fn {election, ward_id, party_id} -> {{election, ward_id}, party_id} end)
 
-    # Like the party page: a gain is any ward won from someone else (including parties
-    # without a stored file, and new wards); a loss needs the previous holder's file.
-    for {{^live_year, ward_id}, holder} <- holders,
-        holders[{previous_year, ward_id}] != holder,
-        reduce: %{} do
-      turnover ->
+    redrawn = Maps.list_redrawn_ward_ids()
+
+    # Like the party page: only wards that existed before with the same shape count; a new
+    # or redrawn ward is neither gained nor lost.
+    Enum.reduce(holders, %{}, fn
+      {{^live_year, ward_id}, holder}, turnover ->
+        previous_holder =
+          if ward_id in redrawn, do: nil, else: holders[{previous_year, ward_id}]
+
+        if previous_holder in [nil, holder],
+          do: turnover,
+          else:
+            turnover |> count_turnover(holder, :gained) |> count_turnover(previous_holder, :lost)
+
+      _previous_election, turnover ->
         turnover
-        |> count_turnover(holder, :gained)
-        |> count_turnover(holders[{previous_year, ward_id}], :lost)
-    end
+    end)
   end
 
   # Per party: council majorities won and lost, counting complete councils only. A
@@ -667,19 +778,24 @@ defmodule Iec.Parties do
     holders = ward_holders(ward_ids)
     first_fetched_at = first_party_fetches(live_year)
     municipality_for = ward_municipalities()
+    redrawn = Maps.list_redrawn_ward_ids()
 
     ward_ids
     |> Enum.map(fn ward_id ->
       now = now_by_id[ward_id]
-      before = before_by_id[ward_id]
       holder_now = holders[{live_year, ward_id}]
-      holder_before = holders[{previous_year, ward_id}]
+      # A ward compares with the previous election only if it existed then and kept its
+      # shape; a new or redrawn ward can be gained, but not lost.
+      comparable = holders[{previous_year, ward_id}] != nil and ward_id not in redrawn
+      before = if comparable, do: before_by_id[ward_id]
+      holder_before = if comparable, do: holders[{previous_year, ward_id}]
       won_now = now != nil and now.won
       held_before = before != nil and before.won
 
       status =
         cond do
           won_now and held_before -> :held
+          won_now and not comparable -> :won_new
           won_now -> :gained
           held_before and holder_now != nil -> :lost
           held_before -> :pending
@@ -702,7 +818,8 @@ defmodule Iec.Parties do
         holder: holder_now && holder_now.party_id,
         declared_at: holder_now && holder_now.first_won_at,
         declared_before_tracking: declared_before_tracking?(holder_now, first_fetched_at),
-        new_ward: before == nil and holder_before == nil
+        new_ward: not comparable,
+        redrawn: ward_id in redrawn
       }
     end)
     |> Enum.sort_by(&{&1.municipality_name, &1.ward_number})

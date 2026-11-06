@@ -277,6 +277,13 @@ defmodule IecWeb.MunicipalityLive do
             <td class="tabular-nums">
               {ward.ward_number}
               <span :if={ward.new_ward} class="badge badge-ghost badge-sm">new</span>
+              <span
+                :if={ward.redrawn}
+                class="badge badge-ghost badge-sm"
+                title="Boundary changed since the previous election"
+              >
+                redrawn
+              </span>
             </td>
             <td>
               <.party_or_dash parties={@parties} party_id={ward.holder} empty="not declared" />

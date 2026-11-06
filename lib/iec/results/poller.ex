@@ -2,7 +2,7 @@ defmodule Iec.Results.Poller do
   @moduledoc """
   Polls one IEC feed file. Each request is conditional on the previous response's
   validators, and the next one is scheduled for when the edge copy expires
-  (`Cache-Control: max-age` minus `Age`). New content is ingested and announced; failures
+  (`Cache-Control: max-age` minus `Age`), or after `:minimum_interval` if that is longer. New content is ingested and announced; failures
   back off from 30 seconds to 5 minutes.
 
   Each poller keeps its latest status as its Registry value, so `statuses/0` reads them
@@ -17,6 +17,7 @@ defmodule Iec.Results.Poller do
 
   @registry Iec.Results.Registry
   @maximum_backoff :timer.minutes(5)
+  @unpublished_retry :timer.minutes(5)
 
   def start_link(options) do
     feed = Keyword.fetch!(options, :feed)
@@ -48,7 +49,14 @@ defmodule Iec.Results.Poller do
   def init(options) do
     feed = Keyword.fetch!(options, :feed)
     Process.send_after(self(), :poll, Keyword.get(options, :initial_delay, 0))
-    {:ok, %{feed: feed, validators: %{etag: nil, last_modified: nil}, failures: 0}}
+
+    {:ok,
+     %{
+       feed: feed,
+       validators: %{etag: nil, last_modified: nil},
+       failures: 0,
+       minimum_interval: Keyword.get(options, :minimum_interval, 0)
+     }}
   end
 
   @impl true
@@ -72,10 +80,15 @@ defmodule Iec.Results.Poller do
     with {:ok, data, body, cache} <- Feed.get(feed.url, state.validators),
          {:ok, changed} <- ingest(feed, data, body, cache.validators) do
       {{:updated, changed}, %{state | validators: cache.validators, failures: 0},
-       cache.next_poll_in}
+       next_delay(state, cache)}
     else
       {:not_modified, cache} ->
-        {:not_modified, %{state | validators: cache.validators, failures: 0}, cache.next_poll_in}
+        {:not_modified, %{state | validators: cache.validators, failures: 0},
+         next_delay(state, cache)}
+
+      # A party file the IEC has not published yet: check again later, not a failure.
+      {:error, {:http_status, status}} when feed.kind == :party and status in [404, 406] ->
+        {:no_file, %{state | failures: 0}, @unpublished_retry}
 
       {:error, reason} ->
         failures = state.failures + 1
@@ -84,6 +97,10 @@ defmodule Iec.Results.Poller do
         {{:error, reason}, %{state | failures: failures}, delay}
     end
   end
+
+  # When the cached copy expires, but never sooner than this poller's minimum interval
+  # (parties beyond the national list are checked every few minutes).
+  defp next_delay(state, cache), do: max(cache.next_poll_in, state.minimum_interval)
 
   # Stores a new file and announces what changed. A failure here (say, a file the
   # parser chokes on) backs off like a failed download instead of crash-looping.
@@ -108,7 +125,7 @@ defmodule Iec.Results.Poller do
       if snapshots != [] do
         Logger.info("#{feed.name}: #{length(snapshots)} areas changed")
         Results.broadcast({:results_changed, Enum.map(snapshots, & &1.id)})
-        if feed.kind == :national, do: Parties.track_national_parties()
+        if feed.kind == :national, do: Parties.follow_national_parties()
       end
 
       {:ok, length(snapshots)}

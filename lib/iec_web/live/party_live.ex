@@ -10,13 +10,12 @@ defmodule IecWeb.PartyLive do
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
 
   # Long lists open collapsed, and show this many rows until "Show all".
-  @collapsed_by_default ["municipalities-kept", "wards-pending", "wards-held"]
+  @collapsed_by_default ["municipalities-kept", "wards-won-new", "wards-pending", "wards-held"]
   @row_limit 25
 
   @impl Phoenix.LiveView
   def mount(%{"id" => id}, _session, socket) do
     party_id = String.to_integer(id)
-    if connected?(socket), do: Parties.track_party(party_id)
     previous_year = Results.previous_year()
 
     {:ok,
@@ -106,7 +105,7 @@ defmodule IecWeb.PartyLive do
             total={@stats.wards_gained}
             items={@breakdowns.wards_gained_from}
             parties={@parties}
-            footnote={"plus #{@breakdowns.new_wards} new wards"}
+            footnote={"plus #{@breakdowns.new_wards} new or redrawn wards won, not compared"}
           />
           <.breakdown_card
             id="councils-lost-to"
@@ -204,7 +203,7 @@ defmodule IecWeb.PartyLive do
         {@stats.councils_kept} kept · {@stats.councils_pending} counting
       </.stat>
       <.stat label="Wards gained / lost" value={"#{@stats.wards_gained} / #{@stats.wards_lost}"}>
-        {@stats.wards_held} held · {@stats.wards_pending} not declared
+        {@stats.wards_held} held · {@stats.wards_won_new} new or redrawn · {@stats.wards_pending} not declared
       </.stat>
       <.stat label="Wards contested" value={format_number(@stats.wards_contested)}>
         in {@stats.municipalities_contested} municipalities
@@ -471,7 +470,9 @@ defmodule IecWeb.PartyLive do
                 </.link>
                 <span :if={is_nil(row.municipality_id)}>{row.municipality_name}</span>
                 · ward {row.ward_number}
-                <span :if={row.new_ward} class="badge badge-ghost badge-sm">new ward</span>
+                <span :if={row.new_ward} class="badge badge-ghost badge-sm">
+                  {if row.redrawn, do: "redrawn", else: "new ward"}
+                </span>
               </td>
               <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
               <td class="text-right tabular-nums opacity-60">

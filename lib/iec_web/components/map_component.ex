@@ -35,6 +35,7 @@ defmodule IecWeb.MapComponent do
   @impl true
   def update(assigns, socket) do
     socket = assign(socket, Map.put_new(assigns, :mode, :leader))
+    socket = assign(socket, :connected, connected?(socket))
     shape_key = {socket.assigns.level, assigns[:province_id], assigns[:municipality_id]}
 
     socket =
@@ -68,7 +69,11 @@ defmodule IecWeb.MapComponent do
     areas =
       for boundary <- boundaries do
         result = results[boundary.area_id]
-        Map.merge(area_style(result, mode, parties), area_details(boundary, result, parties))
+
+        Map.merge(
+          area_style(result, mode, parties),
+          area_details(boundary, result, parties, overview?(socket.assigns))
+        )
       end
 
     changed =
@@ -80,7 +85,12 @@ defmodule IecWeb.MapComponent do
       hatch_colours: areas |> Enum.filter(& &1.hatched) |> Enum.map(& &1.colour) |> Enum.uniq(),
       summary: summary(results, mode, boundaries)
     )
-    |> then(fn socket -> Enum.reduce(changed, socket, &stream_insert(&2, :areas, &1)) end)
+    |> then(fn socket ->
+      # Shapes go out once, over the live connection, not also in the first HTML.
+      if connected?(socket),
+        do: Enum.reduce(changed, socket, &stream_insert(&2, :areas, &1)),
+        else: socket
+    end)
   end
 
   defp style_key(area), do: {area.colour, area.opacity, area.hatched, area.title}
@@ -115,7 +125,13 @@ defmodule IecWeb.MapComponent do
   defp share_opacity(share),
     do: Enum.find_value(@share_bands, fn {floor, opacity} -> share >= floor && opacity end)
 
-  defp area_details(boundary, result, parties) do
+  # Every ward in the country at once uses the coarser outlines.
+  defp overview?(assigns),
+    do:
+      assigns.level == :ward and is_nil(assigns[:province_id]) and
+        is_nil(assigns[:municipality_id])
+
+  defp area_details(boundary, result, parties, overview) do
     leader = result && result.leader && party_abbreviation(parties, %{party_id: result.leader})
 
     previous =
@@ -140,7 +156,7 @@ defmodule IecWeb.MapComponent do
 
     %{
       id: "#{boundary.level}-#{boundary.area_id}",
-      path: boundary.path,
+      path: if(overview, do: boundary.overview_path || boundary.path, else: boundary.path),
       title: title,
       href: area_href(boundary)
     }
@@ -263,6 +279,13 @@ defmodule IecWeb.MapComponent do
             <.icon name="hero-arrows-pointing-out-micro" class="size-4" />
           </button>
         </div>
+
+        <p
+          :if={not @connected}
+          class="pointer-events-none absolute inset-0 grid place-items-center text-sm opacity-60"
+        >
+          Loading map…
+        </p>
 
         <p class="pointer-events-none absolute bottom-2 left-3 text-xs opacity-50">
           Scroll or pinch to zoom · drag to move · click to open

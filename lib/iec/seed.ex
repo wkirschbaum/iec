@@ -1,15 +1,16 @@
 defmodule Iec.Seed do
   @moduledoc """
-  Fills the database in one go, without waiting for the pollers: party names, the
-  previous election's final results, the live election's results so far, every followed
-  party's files for both elections, the map outlines and the ward directory.
+  Fills the database in one go, without waiting for the pollers: party names, both
+  elections' results, the map outlines, every municipality file (which wards belong where,
+  every party standing, and the previous election's ward results), and the files of every
+  party standing for both elections.
 
   The app does all of this on its own when it starts (see `Iec.Application`); this is for
   filling a fresh database up front, or after the count when nothing is being polled.
   Every step is idempotent, so running it again only adds what changed.
   """
 
-  alias Iec.{Parties, Results}
+  alias Iec.{Maps, Parties, Results}
   alias Iec.Results.Feed
 
   def run(report \\ &IO.puts/1) do
@@ -24,32 +25,25 @@ defmodule Iec.Seed do
 
     report.("#{live.year} results")
     for feed <- Feed.feeds(live), do: Results.import_feed(feed)
+    Parties.follow_national_parties()
 
-    party_ids = national_party_ids()
-    report.("Party files for #{length(party_ids)} parties")
+    report.("Map outlines (provinces, municipalities, wards; about 80 MB)")
+    Maps.import_boundaries()
 
-    for party_id <- party_ids do
-      Parties.import_party_file(live, party_id)
+    report.("#{live.year} municipality files: wards and every party standing (a few minutes)")
+    Parties.import_municipality_files()
 
-      unless Parties.party_file_imported?(previous, party_id) do
-        Parties.import_party_file(previous, party_id)
-      end
-    end
+    report.("#{previous.year} municipality files: every ward's result (a few minutes)")
+    Parties.import_previous_ward_results()
 
-    report.("Map outlines (provinces, municipalities, wards)")
-    Iec.Maps.import_boundaries()
+    party_ids = Parties.list_followed_party_ids()
+    report.("#{live.year} files of #{length(party_ids)} parties")
+    for party_id <- party_ids, do: Parties.import_party_file(live, party_id)
 
-    report.("Ward directory (one file per municipality, a few minutes)")
-    Parties.import_ward_directory()
+    report.("#{previous.year} party files")
+    Parties.import_previous_party_files()
 
     report.("Done")
     :ok
-  end
-
-  defp national_party_ids do
-    case Results.get_latest_snapshot(:national, 0) do
-      nil -> []
-      national -> for party <- national.party_results, party.party_id >= 0, do: party.party_id
-    end
   end
 end

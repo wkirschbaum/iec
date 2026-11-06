@@ -3,12 +3,16 @@ defmodule Iec.Maps.Boundary do
   use Ecto.Schema
 
   schema "boundaries" do
+    field :election, :integer
     field :level, Ecto.Enum, values: [:province, :municipality, :ward]
     field :area_id, :integer
     field :province_id, :integer
     field :municipality_id, :integer
     field :name, :string
     field :path, :string
+    field :overview_path, :string
+    field :area, :integer
+    field :redrawn, :boolean, default: false
     field :min_x, :integer
     field :min_y, :integer
     field :max_x, :integer

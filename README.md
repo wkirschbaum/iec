@@ -45,9 +45,11 @@ minute or two.
 1. Party names and colours (`PartyList.js`)
 2. The 2021 final results: national, every province and municipality
 3. The 2026 results so far
-4. The party files of every party on the national list, for 2026 and 2021
-5. Map outlines for provinces, municipalities and wards (about 40 MB, once)
-6. The ward directory: which municipality each ward is in (one file per municipality)
+4. Map outlines for provinces, municipalities and wards, and the 2021 wards (about 80 MB)
+5. The 2026 municipality files: which municipality each ward is in, and every party
+   standing (about 520), which the app then follows
+6. The 2021 municipality files: every party's result in every ward, and its winner
+7. The 2026 and 2021 files of every party standing
 
 Every step is idempotent, so it is safe to run again (for example after the count, when
 nothing is being polled any more), and safe to run while the server is up. Ward files the
@@ -128,11 +130,15 @@ minutes old, so the app is about as live as the IEC's own dashboard.
   tracking began show "before <time>".
 - `wards`: ward → municipality. The party files nest every ward under the province's
   first municipality, so this comes from the municipality files.
+- `followed_parties`: every party standing, found in the municipality files. Parties on the
+  national list are polled as their files change, the rest every five minutes, so every
+  ward's winner is known. Opening a page never makes the app contact the IEC.
+- `boundaries`: map outlines per election. A 2026 ward is `redrawn` when the 2021 ward
+  with its id covers a clearly different area (its area changed by more than about a
+  fifth, or the outlines' bounding boxes overlap by less than 75%). New and redrawn wards
+  are listed as "new or redrawn wards won", not as gained or lost, and the map's "changed
+  since 2021" view leaves them out.
 - `parties`: names and colours.
-
-A ward's previous or new holder is only known for parties whose file is stored (the
-national list, plus any party whose page has been opened), so a few show as "another
-party".
 
 ## Tests
 

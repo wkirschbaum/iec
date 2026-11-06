@@ -69,6 +69,13 @@ defmodule IecWeb.PartySummary do
         },
         %{id: "wards-lost", title: "Lost", status: :lost, other: "Lost to", other_field: :holder},
         %{
+          id: "wards-won-new",
+          title: "New or redrawn wards won (not compared with #{previous_year})",
+          status: :won_new,
+          other: nil,
+          other_field: nil
+        },
+        %{
           id: "wards-pending",
           title: "Held in #{previous_year} · #{live_year} result not declared yet",
           status: :pending,
@@ -93,9 +100,8 @@ defmodule IecWeb.PartySummary do
       stats: stats(overview, councils, wards, count),
       breakdowns: %{
         wards_lost_to: breakdown(wards[:lost] || [], :holder),
-        wards_gained_from:
-          breakdown(Enum.reject(wards[:gained] || [], & &1.new_ward), :previous_holder),
-        new_wards: Enum.count(wards[:gained] || [], & &1.new_ward),
+        wards_gained_from: breakdown(wards[:gained] || [], :previous_holder),
+        new_wards: length(wards[:won_new] || []),
         councils_lost_to:
           council_breakdown(
             (councils[:lost_to_party] || []) ++ (councils[:lost_hung] || []),
@@ -140,6 +146,7 @@ defmodule IecWeb.PartySummary do
       wards_gained: count.(wards, [:gained]),
       wards_lost: count.(wards, [:lost]),
       wards_held: count.(wards, [:held]),
+      wards_won_new: count.(wards, [:won_new]),
       wards_pending: count.(wards, [:pending]),
       wards_contested: length(overview.wards),
       municipalities_contested: length(overview.municipalities)
