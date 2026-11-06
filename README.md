@@ -8,6 +8,8 @@ It is written in [Elixir](https://elixir-lang.org), with
 [Phoenix LiveView](https://www.phoenixframework.org) and PostgreSQL. It is meant to run
 on your own machine: there is no auth.
 
+![The winners and losers page during the count](docs/winners-and-losers.png)
+
 ## Getting started
 
 You need Elixir 1.17+ with Erlang/OTP (the Elixir guide covers both) and PostgreSQL:
