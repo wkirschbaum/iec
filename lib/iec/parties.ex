@@ -457,6 +457,125 @@ defmodule Iec.Parties do
 
   # Latest live snapshot of every municipality (name, province, whether counting is
   # complete), keyed by id.
+  @doc """
+  Who is up and who is down since the previous election:
+
+    * `parties` – every party on the national list with its share now and before, its
+      swing (a new party swings from zero), and the wards and council majorities it
+      gained and lost
+    * `local_swings` – the largest rises and falls of a party within one council
+      (`%{rises: [...], falls: [...]}`, ten each)
+
+  Wards count once declared; councils once their count is complete. Holders are known for
+  parties whose files are stored.
+  """
+  def get_movers do
+    live_year = Results.live_year()
+    previous_year = Results.previous_year()
+    areas = municipality_areas()
+
+    national = Results.get_latest_snapshot(:national, 0)
+    previous = Results.get_latest_snapshot(:national, 0, election: previous_year)
+    previous_by_party = Map.new((previous && previous.party_results) || [], &{&1.party_id, &1})
+    wards = ward_turnover(live_year, previous_year)
+    councils = council_turnover(Map.keys(areas), areas, live_year, previous_year)
+
+    parties =
+      for party <- (national && national.party_results) || [], party.party_id >= 0 do
+        before = previous_by_party[party.party_id]
+        tally = fn turnover, key -> get_in(turnover, [party.party_id, key]) || 0 end
+
+        %{
+          party_id: party.party_id,
+          share: party.vote_percentage,
+          previous_share: before && before.vote_percentage,
+          swing:
+            Float.round(party.vote_percentage - ((before && before.vote_percentage) || 0.0), 2),
+          new_party: is_nil(before),
+          wards_gained: tally.(wards, :gained),
+          wards_lost: tally.(wards, :lost),
+          councils_gained: tally.(councils, :gained),
+          councils_lost: tally.(councils, :lost)
+        }
+      end
+
+    %{parties: parties, local_swings: local_swings(areas, live_year, previous_year)}
+  end
+
+  # Per party: wards it took from another party, and wards another party took from it.
+  defp ward_turnover(live_year, previous_year) do
+    holders =
+      Repo.all(
+        from result in PartyWardResult,
+          where: result.won,
+          select: {result.election, result.ward_id, result.party_id}
+      )
+      |> Map.new(fn {election, ward_id, party_id} -> {{election, ward_id}, party_id} end)
+
+    # Like the party page: a gain is any ward won from someone else (including parties
+    # without a stored file, and new wards); a loss needs the previous holder's file.
+    for {{^live_year, ward_id}, holder} <- holders,
+        holders[{previous_year, ward_id}] != holder,
+        reduce: %{} do
+      turnover ->
+        turnover
+        |> count_turnover(holder, :gained)
+        |> count_turnover(holders[{previous_year, ward_id}], :lost)
+    end
+  end
+
+  # Per party: council majorities won and lost, counting complete councils only. A
+  # majority lost to a hung council counts as lost with no one gaining it.
+  defp council_turnover(municipality_ids, areas, live_year, previous_year) do
+    control = get_council_control(municipality_ids)
+
+    municipality_ids
+    |> Enum.filter(&areas[&1].complete)
+    |> Enum.reduce(%{}, fn municipality_id, turnover ->
+      now = get_in(control, [{live_year, municipality_id}, :majority])
+      before = get_in(control, [{previous_year, municipality_id}, :majority])
+
+      if now == before,
+        do: turnover,
+        else: turnover |> count_turnover(now, :gained) |> count_turnover(before, :lost)
+    end)
+  end
+
+  defp count_turnover(turnover, nil, _key), do: turnover
+
+  defp count_turnover(turnover, party_id, key),
+    do: update_in(turnover, [Access.key(party_id, %{}), Access.key(key, 0)], &(&1 + 1))
+
+  defp local_swings(areas, live_year, previous_year) do
+    swings =
+      Repo.all(
+        from now in PartyMunicipalityResult,
+          join: before in PartyMunicipalityResult,
+          on:
+            before.party_id == now.party_id and before.municipality_id == now.municipality_id and
+              before.election == ^previous_year,
+          where: now.election == ^live_year and not is_nil(now.vote_percentage),
+          select: %{
+            party_id: now.party_id,
+            municipality_id: now.municipality_id,
+            share: now.vote_percentage,
+            previous_share: before.vote_percentage,
+            swing: now.vote_percentage - before.vote_percentage
+          }
+      )
+      |> Enum.map(fn swing ->
+        area = areas[swing.municipality_id] || %{name: "–", complete: false}
+
+        %{swing | swing: Float.round(swing.swing, 2)}
+        |> Map.merge(%{municipality_name: area.name, complete: area.complete})
+      end)
+
+    %{
+      rises: swings |> Enum.sort_by(& &1.swing, :desc) |> Enum.take(10),
+      falls: swings |> Enum.sort_by(& &1.swing) |> Enum.take(10)
+    }
+  end
+
   defp municipality_areas do
     Repo.all(
       from snapshot in Snapshot,

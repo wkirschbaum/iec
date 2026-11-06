@@ -1,14 +1,21 @@
 # IEC results
 
-A Phoenix LiveView app that follows South Africa's 2026 Local Government Elections count
+An app that follows South Africa's 2026 Local Government Elections count
 live from the Electoral Commission (IEC), keeps a timestamped history of every change, and
 compares every area, party, council and ward with 2021.
 
-It is meant to run on your own machine: there is no auth.
+It is written in [Elixir](https://elixir-lang.org), with
+[Phoenix LiveView](https://www.phoenixframework.org) and PostgreSQL. It is meant to run
+on your own machine: there is no auth.
 
 ## Getting started
 
-You need Elixir 1.17+ (with Erlang/OTP) and PostgreSQL.
+You need Elixir 1.17+ with Erlang/OTP (the Elixir guide covers both) and PostgreSQL:
+
+- Elixir: see [Installing Elixir](https://elixir-lang.org/install.html)
+- PostgreSQL: see [PostgreSQL downloads](https://www.postgresql.org/download/)
+
+Then, from this directory:
 
     mix setup        # dependencies, database, first seed, assets
     mix phx.server   # http://localhost:4000
@@ -54,6 +61,8 @@ To start again from nothing: `mix ecto.reset`.
   each ward's winner now and in 2021, and the change history
 - `/parties/:id` (click any party name): stats vs 2021, who it lost wards and councils to
   and gained them from, net change per province, and the councils and wards behind that
+- `/movers`: biggest winners and losers by vote share swing, wards and council
+  majorities changing hands per party, and the biggest local surges and collapses
 - `/changes`: every change, filterable by level
 
 Every page updates live, and a sticky footer shows how far the count is and when the feed

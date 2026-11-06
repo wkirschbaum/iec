@@ -66,6 +66,9 @@ defmodule IecWeb.Layouts do
       <div class="flex-1 flex items-center gap-4 sm:gap-6">
         <.link navigate={~p"/"} class="font-semibold whitespace-nowrap">IEC results</.link>
         <.link navigate={~p"/"} class="text-sm opacity-75 hover:opacity-100">National</.link>
+        <.link navigate={~p"/movers"} class="text-sm opacity-75 hover:opacity-100 whitespace-nowrap">
+          Winners &amp; losers
+        </.link>
         <.link navigate={~p"/changes"} class="text-sm opacity-75 hover:opacity-100">Changes</.link>
       </div>
       <div class="flex-none flex items-center gap-4">

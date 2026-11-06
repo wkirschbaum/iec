@@ -100,6 +100,19 @@ defmodule IecWeb.LiveUpdatesTest do
     end
   end
 
+  test "winners and losers follow the count", %{conn: conn} do
+    ingest_party_file(2021, 7, [{79_800_001, true}])
+    {:ok, view, _html} = live(conn, ~p"/movers")
+
+    ingest_national(500)
+    ingest_party_file(2026, 7, [{79_800_001, false}])
+    ingest_party_file(2026, 52, [{79_800_001, true}])
+
+    html = eventually_render(view, ~s(id="ward-net-52"))
+    assert html =~ ~s(id="ward-net-7")
+    assert html =~ ~s(id="winners-7")
+  end
+
   test "the footer shows each poll as it happens", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/changes")
 
