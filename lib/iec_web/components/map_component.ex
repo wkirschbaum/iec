@@ -74,18 +74,23 @@ defmodule IecWeb.MapComponent do
       if socket.assigns.shape_key == shape_key do
         socket
       else
+        # Outlines only change with an import: read once and shared by every viewer.
         boundaries =
-          Maps.list_boundaries(socket.assigns.level,
-            province_id: assigns[:province_id],
-            municipality_id: assigns[:municipality_id],
-            area_ids: assigns[:area_ids]
-          )
+          Iec.Cache.fetch_lasting({:boundaries, shape_key}, fn ->
+            Maps.list_boundaries(socket.assigns.level,
+              province_id: assigns[:province_id],
+              municipality_id: assigns[:municipality_id],
+              area_ids: assigns[:area_ids]
+            )
+          end)
 
         socket
         |> assign(
           shape_key: shape_key,
           boundaries: boundaries,
           view_box: Maps.view_box(boundaries),
+          ward_names: ward_names(socket.assigns.level, boundaries),
+          labels: labels(socket.assigns.level, boundaries, overview?(assigns)),
           styles: %{}
         )
         |> stream(:areas, [], reset: true)
@@ -112,7 +117,14 @@ defmodule IecWeb.MapComponent do
 
         Map.merge(
           area_style(result, mode, parties),
-          area_details(boundary, result, mode, parties, overview?(socket.assigns))
+          area_details(
+            boundary,
+            result,
+            mode,
+            parties,
+            overview?(socket.assigns),
+            socket.assigns.ward_names[boundary.area_id]
+          )
         )
       end
 
@@ -192,11 +204,13 @@ defmodule IecWeb.MapComponent do
       assigns.level == :ward and is_nil(assigns[:province_id]) and
         is_nil(assigns[:municipality_id]) and is_nil(assigns[:area_ids])
 
-  defp area_details(boundary, result, mode, parties, overview) do
+  defp area_details(boundary, result, mode, parties, overview, ward_name) do
+    name = area_title(boundary, ward_name)
+
     title =
       if is_nil(result) or result.status == :none,
-        do: "#{boundary.name}: no results yet",
-        else: "#{boundary.name}: #{describe(result, mode, parties)}#{counting_note(result)}"
+        do: "#{name}: no results yet",
+        else: "#{name}: #{describe(result, mode, parties)}#{counting_note(result)}"
 
     %{
       id: "#{boundary.level}-#{boundary.area_id}",
@@ -205,6 +219,50 @@ defmodule IecWeb.MapComponent do
       href: area_path(boundary)
     }
   end
+
+  # A ward by number and name, then its municipality: "Ward 73 · Bergvliet, Meadowridge —
+  # CPT - City of Cape Town". Other areas by their own name.
+  defp area_title(%{level: :ward, area_id: ward_id, name: outline_name}, ward_name) do
+    [municipality | _rest] = String.split(outline_name, " · ward ")
+    ward = "Ward #{Iec.Results.Ward.ward_number(ward_id)}"
+    named = if ward_name, do: "#{ward} · #{ward_name}", else: ward
+    "#{named} — #{municipality}"
+  end
+
+  defp area_title(boundary, _ward_name), do: boundary.name
+
+  # Ward names for a ward map's tooltips (other levels have their own names).
+  defp ward_names(:ward, boundaries),
+    do: Map.take(IecWeb.WardNames.all(), Enum.map(boundaries, & &1.area_id))
+
+  defp ward_names(_level, _boundaries), do: %{}
+
+  # Ward numbers printed on a map of a few wards (one municipality, or a ward and its
+  # neighbours), at the centre of each outline's box and sized to it, so they zoom with
+  # the map. Too many wards at once would only be clutter.
+  @max_labels 200
+
+  defp labels(:ward, boundaries, false) when length(boundaries) <= @max_labels do
+    # The whole frame's width: numbers stay between a 90th and a 35th of it.
+    {left, right} =
+      boundaries |> Enum.flat_map(&[&1.min_x, &1.max_x]) |> Enum.min_max(fn -> {0, 1} end)
+
+    frame = max(right - left, 1)
+
+    for boundary <- boundaries do
+      size = min(boundary.max_x - boundary.min_x, boundary.max_y - boundary.min_y) / 2.5
+
+      %{
+        id: boundary.area_id,
+        x: (boundary.min_x + boundary.max_x) / 2,
+        y: (boundary.min_y + boundary.max_y) / 2,
+        size: Float.round(min(max(size, frame / 90), frame / 35) / 1, 2),
+        text: Iec.Results.Ward.ward_number(boundary.area_id)
+      }
+    end
+  end
+
+  defp labels(_level, _boundaries, _overview), do: []
 
   defp counting_note(%{status: :counting}), do: " (counting)"
   defp counting_note(_result), do: ""
@@ -354,6 +412,20 @@ defmodule IecWeb.MapComponent do
                 data-tip={area.title}
                 data-href={area.href}
               />
+            </g>
+            <g :if={@labels != []} id={"#{@id}-labels"} class="pointer-events-none select-none">
+              <text
+                :for={label <- @labels}
+                x={label.x}
+                y={label.y}
+                font-size={label.size}
+                stroke-width={label.size / 5}
+                text-anchor="middle"
+                dominant-baseline="central"
+                class="fill-base-content stroke-base-100 font-semibold [paint-order:stroke]"
+              >
+                {label.text}
+              </text>
             </g>
             <path
               :if={@highlight_path}

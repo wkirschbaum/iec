@@ -18,7 +18,10 @@ defmodule IecWeb.MapLive do
      assign(socket,
        page_title: "Map",
        levels: @levels,
-       provinces: Results.list_area_names(:province) |> Enum.sort_by(&elem(&1, 1))
+       provinces:
+         Iec.Cache.fetch_lasting(:province_names, fn ->
+           Results.list_area_names(:province) |> Enum.sort_by(&elem(&1, 1))
+         end)
      )}
   end
 

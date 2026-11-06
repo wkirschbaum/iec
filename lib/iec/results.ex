@@ -134,7 +134,7 @@ defmodule Iec.Results do
   """
   def import_previous_election do
     import_election(Feed.previous_election())
-    Iec.Cache.invalidate()
+    Iec.Cache.invalidate_lasting()
   end
 
   @doc """
@@ -148,7 +148,7 @@ defmodule Iec.Results do
         election.year not in [live_year(), previous_year()],
         do: import_election(election)
 
-    Iec.Cache.invalidate()
+    Iec.Cache.invalidate_lasting()
   end
 
   @doc "Imports an election's national and province files not stored yet."

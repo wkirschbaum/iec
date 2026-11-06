@@ -164,7 +164,8 @@ calls Overpass.
 [public instance's usage policy](https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances):
 four queries (South Africa in four tiles), one at a time, each only once `/api/status`
 reports a free slot (waiting as long as it says), backing off from 30 seconds to 10 minutes
-on a busy answer, and on giving up trying again two hours later rather than pressing it.
+on a busy answer, and on giving up trying again half an hour later (for up to a day)
+rather than pressing it.
 Requests name the site in their User-Agent.
 
 ## How the history works

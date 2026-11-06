@@ -149,7 +149,7 @@ defmodule IecWeb.ContestsLiveTest do
     rows = Regex.scan(~r/id="ward-contests-(\d+)"/, html, capture: :all_but_first)
     assert length(rows) == 25
     assert List.first(rows) == ["79800001"]
-    assert has_element?(view, "#ward-contests-79800001", "Council 3003 · ward 1")
+    assert has_element?(view, "#ward-contests-79800001", "Council 3003 · Ward 1")
     assert has_element?(view, "#ward-contests-79800001", "2.00 pts")
 
     html =

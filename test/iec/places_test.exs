@@ -122,6 +122,8 @@ defmodule Iec.PlacesTest do
       assert places["Johannesburg"].ward_id == nil
 
       assert Places.list_ward_places(19_100_073) == ["Bergvliet", "Meadowridge"]
+      # Bergvliet is the bigger suburb, so it names the ward first.
+      assert Places.list_ward_names() == %{19_100_073 => "Bergvliet, Meadowridge"}
 
       # Stored once: a second import asks nothing.
       Req.Test.stub(Overpass, fn _conn -> flunk("asked Overpass again") end)

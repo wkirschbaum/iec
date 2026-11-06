@@ -73,7 +73,7 @@ defmodule IecWeb.ContestsLive do
         closest_ward_margin: format_points(closest_ward && closest_ward.margin),
         closest_ward_name:
           closest_ward &&
-            "#{closest_ward.municipality_name} · ward #{closest_ward.ward_number}",
+            "#{closest_ward.municipality_name} · #{IecWeb.WardNames.label(closest_ward.ward_id, closest_ward.ward_number)}",
         closest_ward_path: closest_ward && ~p"/wards/#{closest_ward.ward_id}"
       }
     )
@@ -305,7 +305,10 @@ defmodule IecWeb.ContestsLive do
               <tr :for={row <- @ward_table.rows} id={"ward-contests-#{row.ward_id}"}>
                 <td>
                   <.link navigate={~p"/wards/#{row.ward_id}"} class="link">
-                    {if row.municipality_name, do: "#{row.municipality_name} · "}ward {row.ward_number}
+                    {if row.municipality_name, do: "#{row.municipality_name} · "}<.ward_label
+                      number={row.ward_number}
+                      name={row.ward_name}
+                    />
                   </.link>
                   <span :if={row.redrawn} class="badge badge-ghost badge-xs">redrawn</span>
                 </td>

@@ -148,10 +148,10 @@ defmodule IecWeb.LiveUpdatesTest do
     ])
 
     {:ok, view, html} = live(conn, ~p"/map?level=wards")
-    assert html =~ "JHB · ward 1: no results yet"
+    assert html =~ "Ward 1 — JHB: no results yet"
 
     ingest_party_file(2026, 52, [{79_800_001, true}])
-    assert eventually_render(view, "JHB · ward 1: Party 52 50.0%")
+    assert eventually_render(view, "Ward 1 — JHB: Party 52 50.0%")
   end
 
   test "clicking a column heading sorts the table, again reverses it", %{conn: conn} do

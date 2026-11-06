@@ -33,7 +33,7 @@ defmodule Iec.CacheTest do
 
   test "a caller killed while computing does not hold the others up" do
     owner = spawn(fn -> Cache.fetch(:page, fn -> Process.sleep(:infinity) end) end)
-    wait_until(fn -> :ets.match(Cache, {{:lock, :page, :_}, owner}) != [] end)
+    wait_until(fn -> :ets.match(Cache, {{:lock, :data, :page, :_}, owner}) != [] end)
     Process.exit(owner, :kill)
 
     {microseconds, value} = :timer.tc(fn -> Cache.fetch(:page, fn -> :fresh end) end)

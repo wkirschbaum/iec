@@ -223,11 +223,14 @@ defmodule IecWeb.PartySummary do
   # Wards sort by municipality then ward number; `other` is the party the ward went to or
   # came from (per the section), `other_label` its name.
   defp ward_rows(rows, section, parties) do
+    names = IecWeb.WardNames.all()
+
     Enum.map(rows, fn row ->
       other = section.other_field && Map.get(row, section.other_field)
 
       Map.merge(row, %{
         ward: {row.municipality_name, row.ward_number},
+        ward_name: names[row.ward_id],
         other: other,
         other_label: other && party_abbreviation(parties, %{party_id: other})
       })

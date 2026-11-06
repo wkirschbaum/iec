@@ -42,17 +42,17 @@ defmodule Iec.Places do
   end
 
   @doc """
-  Repeats `import_places/0` until it succeeds, a few hours apart, so a busy Overpass is
-  asked again much later rather than pressed.
+  Repeats `import_places/0` until it succeeds, half an hour apart for up to a day, so a
+  busy Overpass is asked again later rather than pressed.
   """
-  def complete_import(attempts_left \\ 12) do
+  def complete_import(attempts_left \\ 48) do
     case import_places() do
       {:ok, _count} ->
         :ok
 
       {:error, reason} when attempts_left > 1 ->
-        Logger.warning("Places: not imported (#{inspect(reason)}); trying again in 2 hours")
-        Process.sleep(:timer.hours(2))
+        Logger.warning("Places: not imported (#{inspect(reason)}); trying again in 30 minutes")
+        Process.sleep(:timer.minutes(30))
         complete_import(attempts_left - 1)
 
       {:error, reason} ->
@@ -134,6 +134,8 @@ defmodule Iec.Places do
     )
 
     Logger.info("Places: #{length(rows)} stored, #{Enum.count(rows, & &1.ward_id)} in a ward")
+    # Places only change with an import: the lasting tier is stale, and pages refresh.
+    Iec.Cache.invalidate_lasting()
     Results.broadcast(:places_imported)
     length(rows)
   end
@@ -165,6 +167,43 @@ defmodule Iec.Places do
         select:
           map(place, [:name, :alternate_names, :kind, :population, :ward_id, :municipality_id])
     )
+  end
+
+  # The places that best name a ward: neighbourhoods people say they live in first, then
+  # villages and towns, the biggest first.
+  @name_order %{
+    "suburb" => 0,
+    "neighbourhood" => 1,
+    "quarter" => 2,
+    "village" => 3,
+    "town" => 4,
+    "hamlet" => 5,
+    "city" => 6
+  }
+
+  @doc """
+  A name for every ward with places in it, from its best-known places (at most two):
+  `%{ward_id => "Bergvliet, Meadowridge"}`. The IEC gives wards numbers only.
+  """
+  def list_ward_names do
+    Repo.all(
+      from place in Place,
+        where: not is_nil(place.ward_id),
+        select: {place.ward_id, place.name, place.kind, place.population}
+    )
+    |> Enum.group_by(&elem(&1, 0))
+    |> Map.new(fn {ward_id, places} ->
+      names =
+        places
+        |> Enum.sort_by(fn {_ward_id, name, kind, population} ->
+          {Map.get(@name_order, kind, 9), -(population || 0), name}
+        end)
+        |> Enum.map(&elem(&1, 1))
+        |> Enum.uniq()
+        |> Enum.take(2)
+
+      {ward_id, Enum.join(names, ", ")}
+    end)
   end
 
   @doc "The names of the places in a ward, those with the biggest population first."

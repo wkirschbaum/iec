@@ -84,8 +84,9 @@ defmodule IecWeb.WardLive do
 
         %{
           page_title:
-            "Ward #{ward.ward_number}" <>
+            IecWeb.WardNames.label(ward.ward_id, ward.ward_number) <>
               if(municipality_name, do: " · #{municipality_name}", else: ""),
+          ward_label: IecWeb.WardNames.label(ward.ward_id, ward.ward_number),
           ward: ward,
           municipality: municipality,
           province_name:
@@ -130,7 +131,7 @@ defmodule IecWeb.WardLive do
         <.page_header
           eyebrow={(@summary && @summary.eyebrow) || "No results yet"}
           live={@summary != nil and @summary.live}
-          title={"Ward #{@ward.ward_number}"}
+          title={@ward_label}
         >
           <:breadcrumb>
             <.link navigate={~p"/"} class="link-hover link">Overview</.link>

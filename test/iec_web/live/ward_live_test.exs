@@ -189,6 +189,29 @@ defmodule IecWeb.WardLiveTest do
       assert length(Regex.scan(~r/id="ward-parties-\d+"/, html)) == 12
     end
 
+    test "names the ward after the places in it, on the page and its map", %{conn: conn} do
+      Repo.insert_all(Iec.Places.Place, [
+        %{
+          osm_type: "node",
+          osm_id: 1,
+          name: "Meadowridge",
+          kind: "suburb",
+          latitude: -34.03,
+          longitude: 18.45,
+          ward_id: @ward_id,
+          municipality_id: 3003,
+          inserted_at: DateTime.utc_now()
+        }
+      ])
+
+      {:ok, view, html} = live(conn, ~p"/wards/#{@ward_id}")
+      assert html =~ "Ward 1 · Meadowridge"
+      assert html =~ "Takes in Meadowridge."
+      # The neighbour on the map is named in its tooltip, and numbered on the map.
+      assert render(view) =~ "Ward 1 · Meadowridge — Council 3003"
+      assert has_element?(view, "#ward-map-labels text", "2")
+    end
+
     test "says so before the ward has results", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/wards/#{@ward_id}")
       assert html =~ "No party has votes in this ward yet."

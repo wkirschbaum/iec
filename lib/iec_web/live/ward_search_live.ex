@@ -76,6 +76,8 @@ defmodule IecWeb.WardSearchLive do
 
     assign(socket,
       ward_total: length(index.wards),
+      ward_names:
+        Map.take(IecWeb.WardNames.all(), Enum.map((best && best.wards) || [], & &1.ward_id)),
       place_total: length(index.places),
       metros: metros(index),
       ward_rows: ward_rows,
@@ -133,11 +135,14 @@ defmodule IecWeb.WardSearchLive do
   defp top([], [], nil, _places_first), do: nil
 
   defp ward_target(ward) do
-    place = if ward[:place_name], do: "#{ward.place_name}: ", else: ""
-
     %{
       path: ~p"/wards/#{ward.ward_id}",
-      label: "#{place}Ward #{ward.ward_number} · #{ward.municipality_name}"
+      label:
+        if(ward[:place_name],
+          do: "#{ward.place_name}: Ward #{ward.ward_number} · #{ward.municipality_name}",
+          else:
+            "#{IecWeb.WardNames.label(ward.ward_id, ward.ward_number)} · #{ward.municipality_name}"
+        )
     }
   end
 
@@ -179,6 +184,7 @@ defmodule IecWeb.WardSearchLive do
             <.icon name="hero-magnifying-glass" class="size-5 shrink-0 opacity-50" />
             <input
               id="ward-search-input"
+              phx-mounted={JS.focus()}
               type="search"
               name="q"
               value={@query}
@@ -328,6 +334,7 @@ defmodule IecWeb.WardSearchLive do
               <.ward_chip
                 ward_id={ward.ward_id}
                 ward_number={ward.ward_number}
+                name={@ward_names[ward.ward_id]}
                 result={@ward_results[ward.ward_id]}
                 parties={@parties}
                 current={@ward_number == ward.ward_number}
@@ -468,6 +475,9 @@ defmodule IecWeb.WardSearchLive do
             {if @row[:place_name], do: "#{@row.place_name} · "}{@row.municipality_name}
           </span>
           <span class="block font-serif text-3xl leading-tight">Ward {@row.ward_number}</span>
+          <span :if={@row[:ward_name]} class="block text-sm text-base-content/70">
+            {@row.ward_name}
+          </span>
         </span>
         <span class="flex items-center gap-6">
           <span class="space-y-1">
@@ -517,7 +527,9 @@ defmodule IecWeb.WardSearchLive do
             ({@row.place})
           </span>
         </span>
-        <span :if={is_nil(@row[:place_name])} class="block font-medium">Ward {@row.ward_number}</span>
+        <span :if={is_nil(@row[:place_name])} class="block truncate font-medium">
+          <.ward_label number={@row.ward_number} name={@row[:ward_name]} />
+        </span>
         <span class="block truncate text-xs text-base-content/55">
           {if @row[:place_name], do: "Ward #{@row.ward_number} · "}{@row.municipality_name}
         </span>

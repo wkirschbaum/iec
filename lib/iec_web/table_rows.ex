@@ -117,8 +117,11 @@ defmodule IecWeb.TableRows do
   declared.
   """
   def ward_contest_rows(contests, parties) do
+    names = IecWeb.WardNames.all()
+
     for contest <- contests do
       Map.merge(contest, %{
+        ward_name: names[contest.ward_id],
         ward: {contest.municipality_name || "", contest.ward_number},
         leader: party_abbreviation(parties, %{party_id: contest.leader_id}),
         runner_up: party_abbreviation(parties, %{party_id: contest.runner_up_id}),
@@ -133,6 +136,8 @@ defmodule IecWeb.TableRows do
   it is declared. A ward without results has nil figures and the status "no results".
   """
   def ward_result_rows(wards, results, parties) do
+    names = IecWeb.WardNames.all()
+
     for ward <- wards do
       result = results[ward.ward_id]
       leader_id = result && result.leader
@@ -140,6 +145,7 @@ defmodule IecWeb.TableRows do
 
       Map.merge(ward, %{
         ward: {ward.municipality_name || "", ward.ward_number},
+        ward_name: names[ward.ward_id],
         leader_id: leader_id,
         leader: leader_id && party_abbreviation(parties, %{party_id: leader_id}),
         share: result && result.share,

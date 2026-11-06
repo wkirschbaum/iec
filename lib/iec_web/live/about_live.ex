@@ -111,7 +111,7 @@ defmodule IecWeb.AboutLive do
               <li>
                 <strong>OpenStreetMap</strong>: four queries to the Overpass API, once, one at a
                 time, each only when Overpass reports a free slot for us, waiting longer and
-                longer when it is busy, and trying again hours later rather than pressing it;
+                longer when it is busy, and trying again half an hour later rather than pressing it;
                 well inside its <a
                   href="https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances"
                   class="link"

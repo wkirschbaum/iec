@@ -72,6 +72,7 @@ defmodule IecWeb.MunicipalityLive do
       overview.wards
       |> TableRows.with_party_name(parties, :holder, :holder_name)
       |> TableRows.with_party_name(parties, :previous_holder, :previous_holder_name)
+      |> IecWeb.WardNames.with_names()
 
     ward_ids = Enum.map(ward_rows, & &1.ward_id)
     history = Results.list_snapshots_by_election(:municipality, municipality_id)
@@ -86,6 +87,7 @@ defmodule IecWeb.MunicipalityLive do
       |> Enum.map(fn {ward_id, lead} ->
         Map.merge(lead, %{ward_id: ward_id, ward_number: Iec.Results.Ward.ward_number(ward_id)})
       end)
+      |> IecWeb.WardNames.with_names()
 
     Map.new(
       page_title: (municipality && municipality.area_name) || "Municipality",
@@ -303,6 +305,7 @@ defmodule IecWeb.MunicipalityLive do
               <.ward_chip
                 ward_id={ward.ward_id}
                 ward_number={ward.ward_number}
+                name={ward[:ward_name]}
                 result={@ward_results[ward.ward_id]}
                 parties={@parties}
               />
@@ -324,7 +327,12 @@ defmodule IecWeb.MunicipalityLive do
                   navigate={~p"/wards/#{ward.ward_id}"}
                   class="group flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-base-200/70"
                 >
-                  <span class="w-20 shrink-0 whitespace-nowrap font-medium">Ward {ward.ward_number}</span>
+                  <span class="w-28 min-w-0 shrink-0">
+                    <span class="block whitespace-nowrap font-medium">Ward {ward.ward_number}</span>
+                    <span :if={ward.ward_name} class="block truncate text-xs text-base-content/55">
+                      {ward.ward_name}
+                    </span>
+                  </span>
                   <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 text-sm">
                     <.party_label
                       parties={@parties}
@@ -361,7 +369,12 @@ defmodule IecWeb.MunicipalityLive do
                   navigate={~p"/wards/#{ward.ward_id}"}
                   class="group flex min-h-12 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-base-200/70"
                 >
-                  <span class="w-20 shrink-0 whitespace-nowrap font-medium">Ward {ward.ward_number}</span>
+                  <span class="w-28 min-w-0 shrink-0">
+                    <span class="block whitespace-nowrap font-medium">Ward {ward.ward_number}</span>
+                    <span :if={ward.ward_name} class="block truncate text-xs text-base-content/55">
+                      {ward.ward_name}
+                    </span>
+                  </span>
                   <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 text-sm">
                     <.party_label
                       parties={@parties}
@@ -560,6 +573,9 @@ defmodule IecWeb.MunicipalityLive do
               <.link navigate={~p"/wards/#{ward.ward_id}"} class="link font-medium">
                 {ward.ward_number}
               </.link>
+              <span :if={ward.ward_name} class="block max-w-48 truncate text-xs text-base-content/60">
+                {ward.ward_name}
+              </span>
               <span :if={ward.new_ward} class="badge badge-ghost badge-sm">new</span>
               <span
                 :if={ward.redrawn}

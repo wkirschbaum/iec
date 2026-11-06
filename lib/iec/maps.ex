@@ -58,7 +58,7 @@ defmodule Iec.Maps do
     end
 
     mark_redrawn_wards(live.year, previous.year)
-    Iec.Cache.invalidate()
+    Iec.Cache.invalidate_lasting()
   end
 
   # Stored and complete: wards of the live election also need their overview outline.

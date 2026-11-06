@@ -362,9 +362,9 @@ defmodule IecWeb.ResultsComponents do
           <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-#{row.ward_id}"}>
             <td class="whitespace-nowrap">
               <.link navigate={~p"/wards/#{row.ward_id}"} class="link font-medium">
-                Ward {row.ward_number}
+                <.ward_label number={row.ward_number} name={row[:ward_name]} />
               </.link>
-              <span class="opacity-60">· {row.municipality_name}</span>
+              <span class="block text-xs opacity-60">{row.municipality_name}</span>
             </td>
             <td>
               <.party_or_dash parties={@parties} party_id={row.leader_id} empty="no results" />
@@ -384,9 +384,28 @@ defmodule IecWeb.ResultsComponents do
     """
   end
 
+  attr :number, :integer, required: true
+  attr :name, :string, default: nil, doc: "from IecWeb.WardNames: the places in the ward"
+  attr :class, :string, default: nil
+
+  @doc "A ward by number and name: \"Ward 73 · Bergvliet, Meadowridge\"."
+  def ward_label(assigns) do
+    ~H"""
+    <span class={@class}>
+      Ward {@number}<span :if={@name} class="font-normal text-base-content/60"> · {@name}</span>
+    </span>
+    """
+  end
+
   attr :ward_id, :integer, required: true
   attr :ward_number, :integer, required: true
-  attr :result, :map, default: nil, doc: "from Iec.Maps.list_area_results/2"
+  attr :result, :map, default: nil
+
+  attr :name, :string,
+    default: nil,
+    doc: "the places in the ward, for its tooltip",
+    doc: "from Iec.Maps.list_area_results/2"
+
   attr :parties, :map, required: true
   attr :dimmed, :boolean, default: false, doc: "not what is being looked for"
   attr :current, :boolean, default: false, doc: "the ward being looked at, or the exact match"
@@ -407,8 +426,8 @@ defmodule IecWeb.ResultsComponents do
           "border-base-300 bg-base-100 hover:-translate-y-px hover:border-base-content/30 hover:shadow-sm",
         @dimmed && "opacity-30 hover:opacity-100"
       ]}
-      title={ward_chip_title(@ward_number, @result, @parties)}
-      aria-label={ward_chip_title(@ward_number, @result, @parties)}
+      title={ward_chip_title(@ward_number, @name, @result, @parties)}
+      aria-label={ward_chip_title(@ward_number, @name, @result, @parties)}
     >
       <span
         class={[
@@ -426,12 +445,17 @@ defmodule IecWeb.ResultsComponents do
     """
   end
 
-  defp ward_chip_title(number, nil, _parties), do: "Ward #{number}: no results yet"
+  defp ward_chip_title(number, name, result, parties) do
+    ward = if name, do: "Ward #{number} (#{name})", else: "Ward #{number}"
+    ward_chip_result(ward, result, parties)
+  end
 
-  defp ward_chip_title(number, result, parties) do
+  defp ward_chip_result(ward, nil, _parties), do: "#{ward}: no results yet"
+
+  defp ward_chip_result(ward, result, parties) do
     verb = if result.status == :complete, do: "won by", else: "led by"
 
-    "Ward #{number}: #{verb} #{party_abbreviation(parties, %{party_id: result.leader})} " <>
+    "#{ward}: #{verb} #{party_abbreviation(parties, %{party_id: result.leader})} " <>
       "(#{format_percentage(result.share)})"
   end
 
