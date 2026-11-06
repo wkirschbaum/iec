@@ -13,7 +13,7 @@ defmodule Iec.Maps do
   require Logger
 
   alias Iec.Repo
-  alias Iec.Results
+  alias Iec.{Races, Results}
   alias Iec.Results.{Feed, PartyWardResult}
   alias Iec.Maps.{Boundary, Geometry}
 
@@ -261,11 +261,13 @@ defmodule Iec.Maps do
 
   @doc """
   Results per area, keyed by area id:
-  `%{leader: party_id, share: float, status: :none | :counting | :complete, previous_leader: party_id}`.
+  `%{leader: party_id, share: float, status: :none | :counting | :complete, previous_leader: party_id}`,
+  with how close the race is (`runner_up`, `margin` in points, `margin_votes`) and how
+  many ballots were spoilt (`spoilt_votes`, `ballots`, `spoilt_share` in percent).
 
   Provinces and municipalities lead by votes in their latest snapshot; wards by the
-  followed parties' shares, a declared ward by its winner. Areas without results are
-  left out.
+  followed parties' shares, a declared ward by its winner. Wards have no vote counts, so
+  their `margin_votes` and spoilt ballots are nil. Areas without results are left out.
   """
   def list_area_results(level, area_ids) when level in [:province, :municipality] do
     previous_leaders =
@@ -284,44 +286,59 @@ defmodule Iec.Maps do
         end
 
       previous = previous_leaders[snapshot.area_id]
+      lead = Races.lead(snapshot)
 
       {snapshot.area_id,
        %{
          leader: leader.party_id,
          share: leader.vote_percentage,
          status: status,
-         previous_leader: previous && previous.party_id
+         previous_leader: previous && previous.party_id,
+         runner_up: lead && lead.runner_up.party_id,
+         margin: lead && lead.margin,
+         margin_votes: lead && lead.margin_votes,
+         spoilt_votes: snapshot.spoilt_votes,
+         ballots: snapshot.total_votes_cast,
+         spoilt_share: spoilt_share(snapshot)
        }}
     end
   end
 
   def list_area_results(:ward, ward_ids) do
-    leaders = fn year, declared_only ->
+    previous_holders =
       PartyWardResult
-      |> where([result], result.election == ^year and result.ward_id in ^ward_ids)
-      |> where([result], result.vote_percentage > 0.0 or result.won)
-      |> then(&if declared_only, do: where(&1, [result], result.won), else: &1)
-      |> distinct([result], result.ward_id)
-      |> order_by([result], asc: result.ward_id, desc: result.won, desc: result.vote_percentage)
-      |> select([result], {result.ward_id, result})
+      |> where([result], result.election == ^Results.previous_year())
+      |> where([result], result.ward_id in ^ward_ids and result.won)
+      |> select([result], {result.ward_id, result.party_id})
       |> Repo.all()
       |> Map.new()
-    end
 
-    previous = leaders.(Results.previous_year(), true)
     redrawn = list_redrawn_ward_ids()
 
-    for {ward_id, leader} <- leaders.(Results.live_year(), false), into: %{} do
+    for {ward_id, lead} <- Races.list_ward_leads(Results.live_year(), ward_ids), into: %{} do
       # A redrawn ward has no like-for-like previous leader.
-      previous_leader = if ward_id in redrawn, do: nil, else: previous[ward_id]
+      previous_leader = if ward_id in redrawn, do: nil, else: previous_holders[ward_id]
 
       {ward_id,
        %{
-         leader: leader.party_id,
-         share: leader.vote_percentage,
-         status: if(leader.won, do: :complete, else: :counting),
-         previous_leader: previous_leader && previous_leader.party_id
+         leader: lead.leader_id,
+         share: lead.leader_share,
+         status: if(lead.declared, do: :complete, else: :counting),
+         previous_leader: previous_leader,
+         runner_up: lead.runner_up_id,
+         margin: lead.margin,
+         margin_votes: nil,
+         spoilt_votes: nil,
+         ballots: nil,
+         spoilt_share: nil
        }}
     end
   end
+
+  # Spoilt ballots as a share of all ballots cast, or nil before any are counted.
+  defp spoilt_share(%{total_votes_cast: ballots, spoilt_votes: spoilt})
+       when is_integer(ballots) and ballots > 0 and is_integer(spoilt),
+       do: spoilt / ballots * 100
+
+  defp spoilt_share(_snapshot), do: nil
 end

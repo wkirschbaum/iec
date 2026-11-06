@@ -15,17 +15,46 @@ defmodule IecWeb.MapComponent do
     * `:leader` – the leader's colour, stronger for a bigger share; hatched while
       counting, grey before any results
     * `:flips` – only areas whose leader differs from the previous election are coloured
+    * `:margin` – close races: stronger the narrower the lead over the runner-up
+    * `:spoilt` – spoilt ballots as a share of ballots cast (provinces and municipalities;
+      the IEC publishes no ward figure)
 
   Outlines stream in once; after that each refresh (`refreshed_at` changing) re-sends
   only the areas whose colour changed, so the map never flickers or reloads.
   """
   use IecWeb, :live_component
 
-  import IecWeb.ResultsComponents, only: [party_abbreviation: 2, party_colour: 2]
+  import IecWeb.ResultsComponents,
+    only: [format_number: 1, party_abbreviation: 2, party_colour: 2]
 
   alias Iec.Maps
 
   @share_bands [{70, 1.0}, {60, 0.85}, {50, 0.7}, {40, 0.55}, {0, 0.4}]
+
+  # The figure-based modes shade one colour in bands: `{label, from, below, opacity}`, a
+  # value falling in a band when `from <= value < below` (nil is open-ended).
+  @metric_colour "var(--color-primary)"
+
+  @metric_bands %{
+    margin: [
+      {"under 2 pts", nil, 2, 1.0},
+      {"2–5", 2, 5, 0.75},
+      {"5–10", 5, 10, 0.5},
+      {"10–20", 10, 20, 0.3},
+      {"20+ pts", 20, nil, 0.15}
+    ],
+    spoilt: [
+      {"under 1%", nil, 1, 0.15},
+      {"1–1.5%", 1, 1.5, 0.3},
+      {"1.5–2%", 1.5, 2, 0.5},
+      {"2–3%", 2, 3, 0.75},
+      {"3%+", 3, nil, 1.0}
+    ]
+  }
+
+  @doc "The modes a level can be shown in: spoilt ballots are not published per ward."
+  def modes(:ward), do: [:leader, :flips, :margin]
+  def modes(_level), do: [:leader, :flips, :margin, :spoilt]
 
   @impl true
   def mount(socket) do
@@ -72,7 +101,7 @@ defmodule IecWeb.MapComponent do
 
         Map.merge(
           area_style(result, mode, parties),
-          area_details(boundary, result, parties, overview?(socket.assigns))
+          area_details(boundary, result, mode, parties, overview?(socket.assigns))
         )
       end
 
@@ -120,10 +149,31 @@ defmodule IecWeb.MapComponent do
     }
   end
 
+  defp area_style(result, mode, _parties) when mode in [:margin, :spoilt] do
+    case metric_band(mode, metric_value(result, mode)) do
+      nil ->
+        %{colour: nil, opacity: 1.0, hatched: false}
+
+      {_label, _from, _below, opacity} ->
+        %{colour: @metric_colour, opacity: opacity, hatched: result.status == :counting}
+    end
+  end
+
   defp share_opacity(nil), do: 0.4
 
   defp share_opacity(share),
     do: Enum.find_value(@share_bands, fn {floor, opacity} -> share >= floor && opacity end)
+
+  defp metric_value(result, :margin), do: result.margin
+  defp metric_value(result, :spoilt), do: result.spoilt_share
+
+  defp metric_band(_mode, nil), do: nil
+
+  defp metric_band(mode, value) do
+    Enum.find(@metric_bands[mode], fn {_label, from, below, _opacity} ->
+      (is_nil(from) or value >= from) and (is_nil(below) or value < below)
+    end)
+  end
 
   # Every ward in the country at once uses the coarser outlines.
   defp overview?(assigns),
@@ -131,28 +181,11 @@ defmodule IecWeb.MapComponent do
       assigns.level == :ward and is_nil(assigns[:province_id]) and
         is_nil(assigns[:municipality_id])
 
-  defp area_details(boundary, result, parties, overview) do
-    leader = result && result.leader && party_abbreviation(parties, %{party_id: result.leader})
-
-    previous =
-      result && result.previous_leader &&
-        party_abbreviation(parties, %{party_id: result.previous_leader})
-
+  defp area_details(boundary, result, mode, parties, overview) do
     title =
-      cond do
-        is_nil(result) or result.status == :none ->
-          "#{boundary.name}: no results yet"
-
-        true ->
-          share =
-            if result.share,
-              do: " #{:erlang.float_to_binary(result.share / 1, decimals: 1)}%",
-              else: ""
-
-          counting = if result.status == :counting, do: " (counting)", else: ""
-          was = if previous, do: " · #{previous} before", else: ""
-          "#{boundary.name}: #{leader}#{share}#{counting}#{was}"
-      end
+      if is_nil(result) or result.status == :none,
+        do: "#{boundary.name}: no results yet",
+        else: "#{boundary.name}: #{describe(result, mode, parties)}#{counting_note(result)}"
 
     %{
       id: "#{boundary.level}-#{boundary.area_id}",
@@ -162,31 +195,97 @@ defmodule IecWeb.MapComponent do
     }
   end
 
+  defp counting_note(%{status: :counting}), do: " (counting)"
+  defp counting_note(_result), do: ""
+
+  # The tooltip's figures for an area with results, in the terms of the mode.
+  defp describe(result, :margin, parties) do
+    leader = party_abbreviation(parties, %{party_id: result.leader})
+
+    case result do
+      %{runner_up: nil} ->
+        "#{leader} unopposed so far"
+
+      # Ward shares count every ballot; the seat goes by the ward ballot alone.
+      %{margin: nil, runner_up: runner_up} ->
+        "#{leader} won the ward ballot; " <>
+          "#{party_abbreviation(parties, %{party_id: runner_up})} has the bigger share"
+
+      %{runner_up: runner_up} ->
+        votes = if result.margin_votes, do: " · #{format_number(result.margin_votes)} votes"
+
+        "#{leader} ahead of #{party_abbreviation(parties, %{party_id: runner_up})} " <>
+          "by #{decimal(result.margin)} pts#{votes}"
+    end
+  end
+
+  defp describe(%{spoilt_share: nil}, :spoilt, _parties), do: "no spoilt ballot figure"
+
+  defp describe(result, :spoilt, _parties) do
+    "#{decimal(result.spoilt_share)}% spoilt · " <>
+      "#{format_number(result.spoilt_votes)} of #{format_number(result.ballots)} ballots"
+  end
+
+  defp describe(result, _leader_or_flips, parties) do
+    leader = party_abbreviation(parties, %{party_id: result.leader})
+    share = if result.share, do: " #{decimal(result.share)}%", else: ""
+
+    previous =
+      if result.previous_leader,
+        do: " · #{party_abbreviation(parties, %{party_id: result.previous_leader})} before",
+        else: ""
+
+    "#{leader}#{share}#{previous}"
+  end
+
+  defp decimal(value), do: :erlang.float_to_binary(value / 1, decimals: 1)
+
   defp area_href(%{level: :province, area_id: id}), do: ~p"/provinces/#{id}"
   defp area_href(%{level: :municipality, area_id: id}), do: ~p"/municipalities/#{id}"
 
   defp area_href(%{level: :ward, municipality_id: id, area_id: ward_id}),
     do: ~p"/municipalities/#{id}" <> "#ward-#{ward_id}"
 
-  # Legend counts: areas led (or, for flips, won from someone else) per party.
+  # Legend counts: areas led (or, for flips, won from someone else) per party, or for
+  # the figure-based modes, areas per band.
   defp summary(results, mode, boundaries) do
+    reporting = results |> Map.values() |> Enum.reject(&(&1.status == :none))
+
+    %{
+      title: legend_title(mode),
+      parties: party_counts(reporting, mode),
+      bands: band_counts(reporting, mode),
+      empty_label: if(mode in [:margin, :spoilt], do: "no figure yet", else: "no results yet"),
+      total: length(boundaries),
+      reporting: length(reporting),
+      complete: Enum.count(reporting, &(&1.status == :complete))
+    }
+  end
+
+  defp legend_title(:leader), do: "Leading party"
+  defp legend_title(:flips), do: "New leader since #{Iec.Results.previous_year()}"
+  defp legend_title(:margin), do: "Lead over the runner-up"
+  defp legend_title(:spoilt), do: "Spoilt ballots, share of ballots cast"
+
+  defp party_counts(results, mode) when mode in [:leader, :flips] do
     results
-    |> Map.values()
-    |> Enum.reject(&(&1.status == :none))
     |> Enum.filter(fn result ->
       mode == :leader or (result.previous_leader && result.leader != result.previous_leader)
     end)
     |> Enum.frequencies_by(& &1.leader)
     |> Enum.sort_by(fn {_party_id, count} -> -count end)
-    |> then(fn counts ->
-      %{
-        parties: counts,
-        total: length(boundaries),
-        reporting: Enum.count(results, fn {_id, result} -> result.status != :none end),
-        complete: Enum.count(results, fn {_id, result} -> result.status == :complete end)
-      }
-    end)
   end
+
+  defp party_counts(_results, _mode), do: []
+
+  defp band_counts(results, mode) when mode in [:margin, :spoilt] do
+    counts = Enum.frequencies_by(results, &metric_band(mode, metric_value(&1, mode)))
+
+    for {label, _from, _below, opacity} = band <- @metric_bands[mode],
+        do: %{label: label, opacity: opacity, count: Map.get(counts, band, 0)}
+  end
+
+  defp band_counts(_results, _mode), do: nil
 
   defp fill(%{colour: nil}, _component_id), do: "var(--color-base-300)"
   defp fill(%{colour: :unchanged}, _component_id), do: "var(--color-base-200)"
@@ -196,8 +295,9 @@ defmodule IecWeb.MapComponent do
 
   defp fill(%{colour: colour}, _component_id), do: colour
 
+  # Colours are hex codes or CSS variables; keep only what an id may hold.
   defp hatch_id(component_id, colour),
-    do: "#{component_id}-hatch-#{String.trim_leading(colour, "#")}"
+    do: "#{component_id}-hatch-#{String.replace(colour, ~r/[^A-Za-z0-9]/, "")}"
 
   # Hatch stripes scale with the framed area so they read the same at every zoom level.
   defp hatch_size(view_box) do
@@ -433,11 +533,19 @@ defmodule IecWeb.MapComponent do
     <div class="panel grid gap-4 p-4 text-sm sm:grid-cols-[1fr_auto]">
       <div class="space-y-2">
         <div class="text-xs font-medium uppercase tracking-wider opacity-60">
-          {if @mode == :flips,
-            do: "New leader since #{Iec.Results.previous_year()}",
-            else: "Leading party"}
+          {@summary.title}
         </div>
-        <p :if={@summary.parties == []} class="opacity-60">None yet.</p>
+        <p :if={is_nil(@summary.bands) and @summary.parties == []} class="opacity-60">None yet.</p>
+        <div :if={@summary.bands} id="map-bands" class="flex max-w-md">
+          <div :for={band <- @summary.bands} class="flex-1 text-center">
+            <div
+              class="h-2.5 bg-primary first:rounded-l last:rounded-r"
+              style={"opacity: #{band.opacity}"}
+            />
+            <div class="mt-0.5 text-xs tabular-nums opacity-70">{band.label}</div>
+            <div class="text-xs font-medium tabular-nums">{band.count}</div>
+          </div>
+        </div>
         <div class="flex flex-wrap gap-x-4 gap-y-1.5">
           <span :for={{party_id, count} <- @summary.parties} class="inline-flex items-center gap-1.5">
             <span
@@ -470,7 +578,8 @@ defmodule IecWeb.MapComponent do
             same leader
           </span>
           <span class="inline-flex items-center gap-1.5">
-            <span class="inline-block size-3.5 rounded-sm bg-base-300" /> no results yet
+            <span class="inline-block size-3.5 rounded-sm bg-base-300" />
+            {@summary.empty_label}
           </span>
         </div>
         <div class="text-xs tabular-nums opacity-70">
