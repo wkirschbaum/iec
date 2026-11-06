@@ -4,7 +4,8 @@ defmodule IecWeb.Narrative do
   way a results desk would: who leads, by how much, what moved, how far the count is.
   """
 
-  import IecWeb.ResultsComponents, only: [party_abbreviation: 2, percentage_of: 2]
+  import IecWeb.ResultsComponents,
+    only: [format_number: 1, party_abbreviation: 2, percentage_of: 2]
 
   @doc """
   `%{headline, lede, eyebrow, live}` for an area: its snapshot and party rows (`IecWeb.TableRows`).
@@ -133,6 +134,32 @@ defmodule IecWeb.Narrative do
       "gained #{count(stats.councils_gained, "council majority", "council majorities")} " <>
       "and lost #{stats.councils_lost}."
   end
+
+  @doc """
+  One or two sentences on the close races: the narrowest council (`closest`, a council
+  race row, or nil) and how many councils and wards are within `within` points. Nil
+  before any council has two parties on the board.
+  """
+  def close_races(nil, _counts, _within), do: nil
+
+  def close_races(closest, %{councils: councils, wards: wards}, within) do
+    verb = if closest.complete, do: "beat", else: "leads"
+
+    votes =
+      case closest.margin_votes do
+        nil -> ""
+        1 -> ", 1 vote"
+        margin_votes -> ", #{format_number(margin_votes)} votes"
+      end
+
+    "The tightest council race is in #{closest.name}, where #{closest.leader} #{verb} " <>
+      "#{closest.runner_up} by #{precise_points(closest.margin)}#{votes}. " <>
+      "#{String.capitalize(count(councils, "council"))} and #{count(wards, "ward")} " <>
+      "are within #{within} points."
+  end
+
+  defp precise_points(value),
+    do: :erlang.float_to_binary(abs(value) / 1, decimals: 2) <> " points"
 
   defp final?(snapshot),
     do:

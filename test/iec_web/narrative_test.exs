@@ -46,4 +46,37 @@ defmodule IecWeb.NarrativeTest do
     assert Narrative.summary(nil, @rows, %{}, 2021) == nil
     assert Narrative.summary(snapshot(0), [], %{}, 2021) == nil
   end
+
+  describe "close_races/3" do
+    @closest %{
+      name: "Msunduzi",
+      leader: "MKP",
+      runner_up: "DA",
+      margin: 0.05,
+      margin_votes: 67,
+      complete: false
+    }
+
+    test "names the tightest council and counts the close ones" do
+      assert Narrative.close_races(@closest, %{councils: 1, wards: 12}, 5) ==
+               "The tightest council race is in Msunduzi, where MKP leads DA by 0.05 points, " <>
+                 "67 votes. 1 council and 12 wards are within 5 points."
+    end
+
+    test "a finished count is a win" do
+      sentence =
+        Narrative.close_races(
+          %{@closest | complete: true, margin_votes: 1},
+          %{councils: 2, wards: 0},
+          5
+        )
+
+      assert sentence =~ "where MKP beat DA by 0.05 points, 1 vote."
+      assert sentence =~ "2 councils and 0 wards"
+    end
+
+    test "nothing to say without a council race" do
+      assert Narrative.close_races(nil, %{councils: 0, wards: 3}, 5) == nil
+    end
+  end
 end

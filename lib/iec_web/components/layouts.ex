@@ -77,7 +77,7 @@ defmodule IecWeb.Layouts do
             </span>
           </span>
         </.link>
-        <nav class="hidden items-center gap-1 text-sm md:flex">
+        <nav class="hidden items-center gap-1 text-sm lg:flex">
           <.nav_link :for={{label, path, page} <- nav_items()} path={path} active={@active == page}>
             {label}
           </.nav_link>
@@ -88,7 +88,7 @@ defmodule IecWeb.Layouts do
 
     <main class={[
       "py-8 sm:py-10",
-      (@count_progress || @feed_status) && "pb-44 md:pb-32"
+      (@count_progress || @feed_status) && "pb-44 lg:pb-32"
     ]}>
       <div class={[container(), "space-y-12"]}>
         {render_slot(@inner_block)}
@@ -186,7 +186,7 @@ defmodule IecWeb.Layouts do
       </div>
 
       <%!-- On phones the navigation sits here, within thumb reach. --%>
-      <nav class="grid grid-cols-5 border-t border-base-300 md:hidden" aria-label="Sections">
+      <nav class="grid grid-cols-6 border-t border-base-300 lg:hidden" aria-label="Sections">
         <.link
           :for={{label, path, page, icon} <- tab_items()}
           navigate={path}
@@ -210,6 +210,7 @@ defmodule IecWeb.Layouts do
       {"Map", ~p"/map", :map, "hero-map"},
       {"Trends", ~p"/trends", :trends, "hero-presentation-chart-line"},
       {"Movers", ~p"/movers", :movers, "hero-arrows-up-down"},
+      {"Races", ~p"/races", :races, "hero-scale"},
       {"Changes", ~p"/changes", :changes, "hero-bolt"}
     ]
   end
@@ -280,6 +281,7 @@ defmodule IecWeb.Layouts do
       {"Map", ~p"/map", :map},
       {"Trends", ~p"/trends", :trends},
       {"Winners & losers", ~p"/movers", :movers},
+      {"Close races", ~p"/races", :races},
       {"Changes", ~p"/changes", :changes}
     ]
   end
