@@ -44,9 +44,6 @@ defmodule IecWeb.NationalLive do
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
       <div>
         <h1 class="text-2xl font-semibold">{@live_year} Local Government Elections</h1>
-        <p :if={@national} class="text-sm opacity-60">
-          IEC report {format_time(@national.report_date)} SAST · compared with {@previous_year}
-        </p>
       </div>
 
       <div :if={is_nil(@national)} class="alert">

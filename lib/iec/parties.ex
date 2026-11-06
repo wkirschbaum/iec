@@ -354,8 +354,7 @@ defmodule Iec.Parties do
           areas,
           live_year,
           previous_year
-        ),
-      updated_at: last_updated_at(party_id)
+        )
     }
   end
 
@@ -442,17 +441,6 @@ defmodule Iec.Parties do
     |> Repo.all()
     |> Enum.group_by(& &1.election)
     |> Map.new(fn {election, rows} -> {election, Map.new(rows, &{Map.fetch!(&1, key), &1})} end)
-  end
-
-  defp last_updated_at(party_id) do
-    name = "party-#{party_id}"
-    year = Results.live_year()
-
-    Repo.one(
-      from fetch in Fetch,
-        where: fetch.election == ^year and fetch.feed == ^name,
-        select: max(fetch.inserted_at)
-    )
   end
 
   # Latest live snapshot of every municipality (name, province, whether counting is

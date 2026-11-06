@@ -63,7 +63,6 @@ defmodule IecWeb.ProvinceLive do
         <div>
           <.link navigate={~p"/"} class="link text-sm">National</.link>
           <h1 class="text-2xl font-semibold">{@province.area_name}</h1>
-          <p class="text-sm opacity-60">IEC report {format_time(@province.report_date)} SAST</p>
         </div>
 
         <.progress_grid snapshot={@province} />

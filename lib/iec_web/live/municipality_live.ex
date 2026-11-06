@@ -62,9 +62,6 @@ defmodule IecWeb.MunicipalityLive do
             </.link>
           </div>
           <h1 class="text-2xl font-semibold">{@municipality.area_name}</h1>
-          <p class="text-sm opacity-60">
-            IEC report {format_time(@municipality.report_date)} SAST
-          </p>
         </div>
 
         <div class="grid gap-4 sm:grid-cols-3">

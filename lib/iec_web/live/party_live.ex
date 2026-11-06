@@ -106,21 +106,15 @@ defmodule IecWeb.PartyLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div class="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-semibold flex items-center gap-3">
-            <span
-              class="inline-block size-4 rounded-full"
-              style={"background-color: #{party_colour(@parties, %{party_id: @party_id})}"}
-            />
-            {party_abbreviation(@parties, %{party_id: @party_id})}
-          </h1>
-          <p :if={@parties[@party_id]} class="opacity-75">{@parties[@party_id].name}</p>
-        </div>
-        <p class="text-sm opacity-60 text-right">
-          Party file updated {format_time(@overview.updated_at)} SAST<br />
-          compared with {@previous_year}
-        </p>
+      <div>
+        <h1 class="text-2xl font-semibold flex items-center gap-3">
+          <span
+            class="inline-block size-4 rounded-full"
+            style={"background-color: #{party_colour(@parties, %{party_id: @party_id})}"}
+          />
+          {party_abbreviation(@parties, %{party_id: @party_id})}
+        </h1>
+        <p :if={@parties[@party_id]} class="opacity-75">{@parties[@party_id].name}</p>
       </div>
 
       <.stats
