@@ -81,6 +81,26 @@ defmodule IecWeb.ProvinceLive do
         />
 
         <section class="space-y-3">
+          <div class="flex items-baseline justify-between">
+            <h2 class="text-lg font-semibold">Who leads where</h2>
+            <.link
+              navigate={~p"/map?#{[level: "wards", province: @province_id]}"}
+              class="link text-sm"
+            >
+              Wards map
+            </.link>
+          </div>
+          <.live_component
+            module={IecWeb.MapComponent}
+            id="province-map"
+            level={:municipality}
+            province_id={@province_id}
+            parties={@parties}
+            refreshed_at={@refreshed_at}
+          />
+        </section>
+
+        <section class="space-y-3">
           <h2 class="text-lg font-semibold">Municipalities</h2>
           <div class="overflow-x-auto">
             <table id="municipalities" class="table table-sm">

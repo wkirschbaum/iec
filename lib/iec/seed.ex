@@ -2,7 +2,7 @@ defmodule Iec.Seed do
   @moduledoc """
   Fills the database in one go, without waiting for the pollers: party names, the
   previous election's final results, the live election's results so far, every followed
-  party's files for both elections, and the ward directory.
+  party's files for both elections, the map outlines and the ward directory.
 
   The app does all of this on its own when it starts (see `Iec.Application`); this is for
   filling a fresh database up front, or after the count when nothing is being polled.
@@ -35,6 +35,9 @@ defmodule Iec.Seed do
         Parties.import_party_file(previous, party_id)
       end
     end
+
+    report.("Map outlines (provinces, municipalities, wards)")
+    Iec.Maps.import_boundaries()
 
     report.("Ward directory (one file per municipality, a few minutes)")
     Parties.import_ward_directory()

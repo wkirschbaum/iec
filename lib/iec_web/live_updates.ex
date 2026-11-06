@@ -6,7 +6,8 @@ defmodule IecWeb.LiveUpdates do
       on_mount {IecWeb.LiveUpdates, [:results, :parties]}
 
   It assigns `@parties` (names and colours), `@feed_status` (the header) and
-  `@count_progress` (the sticky footer),
+  `@count_progress` (the sticky footer), `@refreshed_at` (changes on every refresh, for
+  live components such as maps to pick up),
   keeps both current, and calls the view's `refresh/1` when results or party files
   change. A poll round lands as several messages within seconds, so refreshes are
   coalesced: at most one per second.
@@ -35,7 +36,8 @@ defmodule IecWeb.LiveUpdates do
        parties: Results.parties_by_id(),
        feed_statuses: Poller.statuses(),
        count_progress: Results.get_count_progress(),
-       refresh_scheduled: false
+       refresh_scheduled: false,
+       refreshed_at: System.monotonic_time()
      )
      |> assign_feed_status()
      |> attach_hook(:live_updates, :handle_info, &handle_info/2)}
@@ -55,7 +57,11 @@ defmodule IecWeb.LiveUpdates do
   defp handle_info(:refresh, socket) do
     {:halt,
      socket
-     |> assign(refresh_scheduled: false, count_progress: Results.get_count_progress())
+     |> assign(
+       refresh_scheduled: false,
+       refreshed_at: System.monotonic_time(),
+       count_progress: Results.get_count_progress()
+     )
      |> socket.view.refresh()}
   end
 

@@ -161,6 +161,18 @@ defmodule IecWeb.MunicipalityLive do
           </div>
         </section>
 
+        <section class="space-y-3">
+          <h2 class="text-lg font-semibold">Wards map</h2>
+          <.live_component
+            module={IecWeb.MapComponent}
+            id="municipality-map"
+            level={:ward}
+            municipality_id={@municipality_id}
+            parties={@parties}
+            refreshed_at={@refreshed_at}
+          />
+        </section>
+
         <section :if={@wards != []} class="space-y-2">
           <h2 class="text-lg font-semibold">
             Wards

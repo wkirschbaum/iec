@@ -61,6 +61,9 @@ defmodule Iec.Results.Feed do
     "#{config()[:base_url]}/#{election.year}/#{election.electoral_event}Munic#{municipality_id}.js"
   end
 
+  @doc "A boundary file of the IEC's election map (GeoJSON), e.g. `nationalMunic`."
+  def map_url(election, name), do: "#{config()[:map_url]}/#{election.year}/#{name}.js"
+
   @doc "The dashboard's party list (id, abbreviation, full name, colour) for an election."
   def party_list_url(election), do: "#{config()[:base_url]}/#{election.year}/PartyList.js"
 
@@ -72,9 +75,9 @@ defmodule Iec.Results.Feed do
   Returns `{:ok, data, body, cache}` with the decoded JSON and the raw body,
   `{:not_modified, cache}` when the file has not changed, or `{:error, reason}`.
   """
-  @spec get(String.t(), validators()) ::
+  @spec get(String.t(), validators(), keyword()) ::
           {:ok, map(), binary(), cache()} | {:not_modified, cache()} | {:error, term()}
-  def get(url, validators \\ %{etag: nil, last_modified: nil}) do
+  def get(url, validators \\ %{etag: nil, last_modified: nil}, request_options \\ []) do
     options =
       Keyword.merge(
         [
@@ -84,7 +87,7 @@ defmodule Iec.Results.Feed do
           retry: &retry?/2,
           max_retries: 3
         ],
-        config()[:req_options] || []
+        Keyword.merge(request_options, config()[:req_options] || [])
       )
 
     case Req.get(url, options) do

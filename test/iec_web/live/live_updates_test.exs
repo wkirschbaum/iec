@@ -113,6 +113,30 @@ defmodule IecWeb.LiveUpdatesTest do
     assert html =~ ~s(id="winners-7")
   end
 
+  test "the map recolours a ward when its result comes in", %{conn: conn} do
+    Iec.Repo.insert_all(Iec.Maps.Boundary, [
+      %{
+        level: :ward,
+        area_id: 79_800_001,
+        municipality_id: 3003,
+        province_id: 3,
+        name: "JHB · ward 1",
+        path: "M0 0l10 0 0 10z",
+        min_x: 0,
+        min_y: 0,
+        max_x: 10,
+        max_y: 10,
+        inserted_at: DateTime.utc_now()
+      }
+    ])
+
+    {:ok, view, html} = live(conn, ~p"/map?level=wards")
+    assert html =~ "JHB · ward 1: no results yet"
+
+    ingest_party_file(2026, 52, [{79_800_001, true}])
+    assert eventually_render(view, "JHB · ward 1: Party 52 50.0%")
+  end
+
   test "the footer shows each poll as it happens", %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/changes")
 

@@ -46,7 +46,8 @@ minute or two.
 2. The 2021 final results: national, every province and municipality
 3. The 2026 results so far
 4. The party files of every party on the national list, for 2026 and 2021
-5. The ward directory: which municipality each ward is in (one file per municipality)
+5. Map outlines for provinces, municipalities and wards (about 40 MB, once)
+6. The ward directory: which municipality each ward is in (one file per municipality)
 
 Every step is idempotent, so it is safe to run again (for example after the count, when
 nothing is being polled any more), and safe to run while the server is up. Ward files the
@@ -57,11 +58,16 @@ To start again from nothing: `mix ecto.reset`.
 
 ## Pages
 
-- `/`: national progress, parties vs 2021, provinces, latest changes
-- `/provinces/:id`: parties vs 2021, and each municipality's council control and leader,
-  now and in 2021
+- `/`: national progress, parties vs 2021, a map of who leads each municipality, provinces,
+  latest changes
+- `/map`: the map at province, municipality or ward level, for the whole country or one
+  province: each area in its leading party's colour (stronger for a bigger lead,
+  hatched while counting), or only the areas that changed hands since 2021. Hover for
+  details, click to open the area
+- `/provinces/:id`: parties vs 2021, a map of its municipalities, and each municipality's
+  council control and leader, now and in 2021
 - `/municipalities/:id`: council control now and in 2021, every followed party vs 2021,
-  each ward's winner now and in 2021, and the change history
+  a ward map, each ward's winner now and in 2021, and the change history
 - `/parties/:id` (click any party name): stats vs 2021, who it lost wards and councils to
   and gained them from, net change per province, and the councils and wards behind that
 - `/movers`: biggest winners and losers by vote share swing, wards and council
@@ -85,6 +91,11 @@ instead: static JSON files under
 | `EEID1887Party<id>.js` | one party: share, seats and majority per municipality, share and win per ward |
 | `EEID1887Munic<id>.js` | one municipality with every ward and voting district (up to ~3 MB; only read for the ward directory) |
 | `PartyList.js` | party id → abbreviation, full name, colour |
+
+Map outlines come from the IEC's election map,
+`https://results.elections.org.za/ElectionMap/MapData/<year>/` (`nationalProvince.js`, `nationalMunic.js`, `nationalWard.js`, GeoJSON). They are
+projected, simplified and stored once as SVG paths (`Iec.Maps.Geometry`), so the maps are
+plain server-rendered SVG: on each update LiveView sends only the areas whose colour changed.
 
 The event ids (`EEID1887` for 2026, `EEID1091` for 2021) come from `var EEID2026` and
 friends in the dashboard's `LGEResultsDashboard.aspx`; they live in `config/config.exs`.

@@ -67,6 +67,20 @@ defmodule IecWeb.NationalLive do
         />
       </section>
 
+      <section class="space-y-3">
+        <div class="flex items-baseline justify-between">
+          <h2 class="text-lg font-semibold">Who leads where</h2>
+          <.link navigate={~p"/map"} class="link text-sm">Full map</.link>
+        </div>
+        <.live_component
+          module={IecWeb.MapComponent}
+          id="national-map"
+          level={:municipality}
+          parties={@parties}
+          refreshed_at={@refreshed_at}
+        />
+      </section>
+
       <section :if={@provinces != []} class="space-y-3">
         <h2 class="text-lg font-semibold">Provinces</h2>
         <div class="overflow-x-auto">

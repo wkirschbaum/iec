@@ -39,6 +39,7 @@ defmodule Iec.Application do
              Iec.Results.refresh_parties()
              Iec.Results.import_previous_election()
              Iec.Parties.track_national_parties()
+             Iec.Maps.import_boundaries()
              Iec.Parties.complete_ward_directory()
            end},
           id: :results_setup,

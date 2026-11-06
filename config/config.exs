@@ -16,6 +16,8 @@ config :iec,
 # `var EEID2026` and friends on LGEResultsDashboard.aspx.
 config :iec, Iec.Results,
   base_url: "https://results.elections.org.za/dashboards/lge/MapsJason",
+  # Boundaries (GeoJSON) behind the IEC's election map.
+  map_url: "https://results.elections.org.za/ElectionMap/MapData",
   # Polled while counting runs.
   live_election: %{year: 2026, electoral_event: "EEID1887"},
   # Imported once (its files are final) to compare against. `var EEID2021` on the same page.
