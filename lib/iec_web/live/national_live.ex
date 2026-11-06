@@ -5,6 +5,7 @@ defmodule IecWeb.NationalLive do
 
   alias Iec.Results
   alias Iec.Results.Change
+  alias IecWeb.TableRows
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results]}
@@ -23,17 +24,24 @@ defmodule IecWeb.NationalLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    previous_year = socket.assigns.previous_year
+    %{previous_year: previous_year, parties: parties} = socket.assigns
+    national = Results.get_latest_snapshot(:national, 0)
+    previous_national = Results.get_latest_snapshot(:national, 0, election: previous_year)
 
     previous_provinces =
       Results.list_latest_snapshots(election: previous_year, level: :province)
       |> Map.new(&{&1.area_id, &1})
 
     assign(socket,
-      national: Results.get_latest_snapshot(:national, 0),
-      previous_national: Results.get_latest_snapshot(:national, 0, election: previous_year),
-      provinces: Results.list_latest_snapshots(level: :province),
-      previous_provinces: previous_provinces,
+      national: national,
+      previous_national: previous_national,
+      party_rows: TableRows.party_rows(national, previous_national, parties),
+      province_rows:
+        TableRows.area_rows(
+          Results.list_latest_snapshots(level: :province),
+          previous_provinces,
+          parties
+        ),
       changes: Results.list_changes(changed_only: true, limit: 15) |> Enum.map(&Change.compare/1)
     )
   end
@@ -42,9 +50,7 @@ defmodule IecWeb.NationalLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div>
-        <h1 class="text-2xl font-semibold">{@live_year} Local Government Elections</h1>
-      </div>
+      <h1 class="text-2xl font-semibold">{@live_year} Local Government Elections</h1>
 
       <div :if={is_nil(@national)} class="alert">
         No results yet. The first poll runs a few seconds after start-up.
@@ -59,10 +65,10 @@ defmodule IecWeb.NationalLive do
         />
         <.party_table
           id="national-parties"
+          rows={@party_rows}
           parties={@parties}
-          snapshot={@national}
-          previous_election={@previous_national}
           previous_year={@previous_year}
+          sorts={@sorts}
           show_councils
         />
       </section>
@@ -81,43 +87,17 @@ defmodule IecWeb.NationalLive do
         />
       </section>
 
-      <section :if={@provinces != []} class="space-y-3">
+      <section :if={@province_rows != []} class="space-y-3">
         <h2 class="text-lg font-semibold">Provinces</h2>
-        <div class="overflow-x-auto">
-          <table id="provinces" class="table table-sm">
-            <thead>
-              <tr>
-                <th>Province</th>
-                <th class="text-right">Districts counted</th>
-                <th>Leading</th>
-                <th class="text-right">Share</th>
-                <th>{@previous_year} leader</th>
-                <th class="text-right">{@previous_year} share</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={province <- @provinces} id={"province-#{province.area_id}"}>
-                <td>
-                  <.link navigate={~p"/provinces/#{province.area_id}"} class="link">
-                    {province.area_name}
-                  </.link>
-                </td>
-                <td class="text-right tabular-nums">
-                  {format_progress(
-                    province.voting_districts_complete,
-                    province.voting_districts_expected
-                  )}
-                </td>
-                <.leader_cells parties={@parties} snapshot={province} />
-                <.leader_cells
-                  parties={@parties}
-                  snapshot={@previous_provinces[province.area_id]}
-                  muted
-                />
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <.area_table
+          id="provinces"
+          rows={@province_rows}
+          parties={@parties}
+          previous_year={@previous_year}
+          sorts={@sorts}
+          area_label="Province"
+          area_path={&~p"/provinces/#{&1}"}
+        />
       </section>
 
       <section class="space-y-2">

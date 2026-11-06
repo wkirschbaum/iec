@@ -477,8 +477,7 @@ defmodule Iec.Parties do
           party_id: party.party_id,
           share: party.vote_percentage,
           previous_share: before && before.vote_percentage,
-          swing:
-            Float.round(party.vote_percentage - ((before && before.vote_percentage) || 0.0), 2),
+          swing: Results.swing(party.vote_percentage, (before && before.vote_percentage) || 0.0),
           new_party: is_nil(before),
           wards_gained: tally.(wards, :gained),
           wards_lost: tally.(wards, :lost),
@@ -629,7 +628,15 @@ defmodule Iec.Parties do
   Who controls each council, per election, among the parties we have files for:
   `%{{election, municipality_id} => %{majority: party_id | nil, largest: party_id | nil}}`.
   With no majority the council is hung (or still counting) and `largest` has the most seats.
+
+  `get_council_control/2` returns one election's, keyed by municipality id.
   """
+  def get_council_control(municipality_ids, year) do
+    for {{^year, municipality_id}, control} <- get_council_control(municipality_ids),
+        into: %{},
+        do: {municipality_id, control}
+  end
+
   def get_council_control(municipality_ids) do
     Repo.all(
       from result in PartyMunicipalityResult,
@@ -754,9 +761,6 @@ defmodule Iec.Parties do
     fn ward_id -> wards[ward_id] || by_code[Ward.municipality_code(ward_id)] end
   end
 
-  defp swing(nil, _before), do: nil
-  defp swing(_now, nil), do: nil
-
-  defp swing(%{vote_percentage: now}, %{vote_percentage: before}),
-    do: Float.round(now - before, 2)
+  defp swing(now, before),
+    do: Results.swing(now && now.vote_percentage, before && before.vote_percentage)
 end

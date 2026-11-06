@@ -33,6 +33,24 @@ defmodule Iec.Results do
   def live_year, do: Feed.live_election().year
   def previous_year, do: Feed.previous_election().year
 
+  @doc """
+  The party with the most valid votes in a snapshot (parties only, not "Other"), or nil
+  before anyone has votes.
+  """
+  def leading_party(nil), do: nil
+
+  def leading_party(%Snapshot{party_results: party_results}) do
+    party_results
+    |> Enum.filter(&(&1.party_id >= 0 and (&1.total_valid_votes || 0) > 0))
+    |> Enum.max_by(& &1.total_valid_votes, fn -> nil end)
+  end
+
+  @doc "The change in vote share in percentage points, or nil when either side is missing."
+  def swing(now, before) when is_number(now) and is_number(before),
+    do: Float.round((now - before) / 1, 2)
+
+  def swing(_now, _before), do: nil
+
   ## Ingesting
 
   @doc """

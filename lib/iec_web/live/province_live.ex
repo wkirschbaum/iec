@@ -5,6 +5,7 @@ defmodule IecWeb.ProvinceLive do
 
   alias Iec.{Parties, Results}
   alias Iec.Results.Change
+  alias IecWeb.TableRows
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
@@ -23,8 +24,12 @@ defmodule IecWeb.ProvinceLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    %{province_id: province_id, live_year: live_year, previous_year: previous_year} =
-      socket.assigns
+    %{
+      province_id: province_id,
+      live_year: live_year,
+      previous_year: previous_year,
+      parties: parties
+    } = socket.assigns
 
     province = Results.get_latest_snapshot(:province, province_id)
     municipalities = Results.list_latest_snapshots(level: :municipality, province_id: province_id)
@@ -37,16 +42,18 @@ defmodule IecWeb.ProvinceLive do
       )
       |> Map.new(&{&1.area_id, &1})
 
-    control = Parties.get_council_control(Enum.map(municipalities, & &1.area_id))
+    control = Parties.get_council_control(Enum.map(municipalities, & &1.area_id), live_year)
+
+    previous_province =
+      Results.get_latest_snapshot(:province, province_id, election: previous_year)
 
     assign(socket,
       page_title: (province && province.area_name) || "Province",
       province: province,
-      previous_province:
-        Results.get_latest_snapshot(:province, province_id, election: previous_year),
-      municipalities: municipalities,
-      previous_municipalities: previous_municipalities,
-      control: Map.new(municipalities, &{&1.area_id, control[{live_year, &1.area_id}]}),
+      previous_province: previous_province,
+      party_rows: TableRows.party_rows(province, previous_province, parties),
+      municipality_rows:
+        TableRows.area_rows(municipalities, previous_municipalities, parties, control),
       changes:
         Results.list_changes(province_id: province_id, changed_only: true, limit: 40)
         |> Enum.map(&Change.compare/1)
@@ -73,10 +80,10 @@ defmodule IecWeb.ProvinceLive do
         />
         <.party_table
           id="province-parties"
+          rows={@party_rows}
           parties={@parties}
-          snapshot={@province}
-          previous_election={@previous_province}
           previous_year={@previous_year}
+          sorts={@sorts}
           show_councils
         />
 
@@ -102,58 +109,16 @@ defmodule IecWeb.ProvinceLive do
 
         <section class="space-y-3">
           <h2 class="text-lg font-semibold">Municipalities</h2>
-          <div class="overflow-x-auto">
-            <table id="municipalities" class="table table-sm">
-              <thead>
-                <tr>
-                  <th>Municipality</th>
-                  <th class="text-right">Districts counted</th>
-                  <th>Council</th>
-                  <th>Leading</th>
-                  <th class="text-right">Share</th>
-                  <th>{@previous_year} leader</th>
-                  <th class="text-right">{@previous_year} share</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  :for={municipality <- @municipalities}
-                  id={"municipality-#{municipality.area_id}"}
-                >
-                  <td>
-                    <.link navigate={~p"/municipalities/#{municipality.area_id}"} class="link">
-                      {municipality.area_name}
-                    </.link>
-                  </td>
-                  <td class="text-right tabular-nums">
-                    {format_progress(
-                      municipality.voting_districts_complete,
-                      municipality.voting_districts_expected
-                    )}
-                  </td>
-                  <td>
-                    <.council_control
-                      :if={municipality.municipalities_complete == 1}
-                      parties={@parties}
-                      control={@control[municipality.area_id]}
-                    />
-                    <span
-                      :if={municipality.municipalities_complete != 1}
-                      class="badge badge-ghost badge-sm"
-                    >
-                      counting
-                    </span>
-                  </td>
-                  <.leader_cells parties={@parties} snapshot={municipality} />
-                  <.leader_cells
-                    parties={@parties}
-                    snapshot={@previous_municipalities[municipality.area_id]}
-                    muted
-                  />
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <.area_table
+            id="municipalities"
+            rows={@municipality_rows}
+            parties={@parties}
+            previous_year={@previous_year}
+            sorts={@sorts}
+            area_label="Municipality"
+            area_path={&~p"/municipalities/#{&1}"}
+            show_council
+          />
         </section>
 
         <section class="space-y-2">

@@ -97,7 +97,7 @@ defmodule Iec.ResultsTest do
       assert {"voting districts", 2, 8} in change.progress
       assert [%{party_id: 7, votes: 150}] = change.parties
 
-      assert {%{party_id: 52}, %{party_id: 7}} = change.leader
+      assert %{from: %{party_id: 52}, to: %{party_id: 7}} = change.leader
     end
 
     test "a first snapshot has nothing to compare" do

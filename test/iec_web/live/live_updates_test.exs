@@ -110,10 +110,10 @@ defmodule IecWeb.LiveUpdatesTest do
     assert length(Regex.scan(~r/id="wards-lost-\d+"/, html)) == 25
     assert html =~ "Show all 30"
 
-    html = view |> element("#wards-lost button", "Show all") |> render_click()
+    html = view |> element("#wards-lost button[phx-click=show_all]") |> render_click()
     assert length(Regex.scan(~r/id="wards-lost-\d+"/, html)) == 30
 
-    html = view |> element("#wards-lost button", "Lost") |> render_click()
+    html = view |> element("#wards-lost button[phx-click=toggle_section]") |> render_click()
     assert Regex.scan(~r/id="wards-lost-\d+"/, html) == []
   end
 
@@ -152,6 +152,20 @@ defmodule IecWeb.LiveUpdatesTest do
 
     ingest_party_file(2026, 52, [{79_800_001, true}])
     assert eventually_render(view, "JHB · ward 1: Party 52 50.0%")
+  end
+
+  test "clicking a column heading sorts the table, again reverses it", %{conn: conn} do
+    ingest_national(500)
+    {:ok, view, _html} = live(conn, ~p"/")
+
+    order = fn html ->
+      Regex.scan(~r/id="national-parties-party-(\d+)"/, html, capture: :all_but_first)
+      |> List.flatten()
+    end
+
+    header = element(view, ~s(#national-parties button[phx-value-column="votes"]))
+    assert order.(render_click(header)) == ["7", "52"]
+    assert order.(render_click(header)) == ["52", "7"]
   end
 
   test "the footer shows each poll as it happens", %{conn: conn} do

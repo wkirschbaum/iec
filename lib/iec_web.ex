@@ -81,6 +81,7 @@ defmodule IecWeb do
       import Phoenix.HTML
       # Core UI components
       import IecWeb.CoreComponents
+      import IecWeb.Sorting, only: [sort_header: 1, sort_rows: 2]
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

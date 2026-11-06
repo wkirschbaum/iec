@@ -67,9 +67,11 @@ defmodule IecWeb.ResultsComponents do
   def percentage_of(_complete, expected) when expected in [nil, 0], do: 0.0
   def percentage_of(complete, expected), do: (complete || 0) / expected * 100
 
-  @doc "How far along a count is, e.g. \"71.3%\"."
+  @doc "How far along a count is, e.g. \"71.3%\", from counts or a percentage."
   def format_progress(complete, expected),
-    do: :erlang.float_to_binary(percentage_of(complete, expected), decimals: 1) <> "%"
+    do: format_progress(percentage_of(complete, expected))
+
+  def format_progress(percentage), do: :erlang.float_to_binary(percentage / 1, decimals: 1) <> "%"
 
   def party_abbreviation(parties, party_result) do
     case party_result.party_id do
@@ -87,13 +89,6 @@ defmodule IecWeb.ResultsComponents do
 
   def party_colour(parties, party_result) do
     (parties[party_result.party_id] && parties[party_result.party_id].colour) || "#9ca3af"
-  end
-
-  @doc "The party with the most valid votes in a snapshot, or nil."
-  def leader(nil), do: nil
-
-  def leader(%Snapshot{party_results: party_results}) do
-    Enum.max_by(party_results, &(&1.total_valid_votes || 0), fn -> nil end)
   end
 
   def area_path(%{level: :national}), do: ~p"/"
@@ -265,97 +260,145 @@ defmodule IecWeb.ResultsComponents do
   end
 
   attr :id, :string, required: true
+  attr :rows, :list, required: true, doc: "from IecWeb.TableRows.party_rows/3"
   attr :parties, :map, required: true
-  attr :snapshot, Snapshot, required: true
-  attr :previous_election, Snapshot, default: nil
   attr :previous_year, :integer, required: true
+  attr :sorts, :map, required: true
   attr :show_councils, :boolean, default: false
 
+  @doc "Parties' votes, share and seats, against the previous election. Sortable."
   def party_table(assigns) do
-    previous_by_party =
-      case assigns.previous_election do
-        nil -> %{}
-        snapshot -> Map.new(snapshot.party_results, &{&1.party_id, &1})
-      end
-
-    rows =
-      for party_result <-
-            Enum.sort_by(assigns.snapshot.party_results, &(-(&1.total_valid_votes || 0))) do
-        {party_result, Map.get(previous_by_party, party_result.party_id)}
-      end
-
-    assigns = assign(assigns, :rows, rows)
-
     ~H"""
     <div class="overflow-x-auto">
       <table id={@id} class="table table-sm">
         <thead>
           <tr>
-            <th>Party</th>
-            <th class="text-right">Votes</th>
-            <th class="text-right">Share</th>
-            <th class="text-right">{@previous_year}</th>
-            <th class="text-right">Swing</th>
-            <th class="text-right">Seats</th>
-            <th class="text-right">{@previous_year}</th>
-            <th :if={@show_councils} class="text-right">Councils won</th>
-            <th :if={@show_councils} class="text-right">{@previous_year}</th>
+            <.sort_header table={@id} column="party" sorts={@sorts} first="asc">Party</.sort_header>
+            <.sort_header table={@id} column="votes" sorts={@sorts} align="right">Votes</.sort_header>
+            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Share</.sort_header>
+            <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
+              {@previous_year}
+            </.sort_header>
+            <.sort_header table={@id} column="swing" sorts={@sorts} align="right">Swing</.sort_header>
+            <.sort_header table={@id} column="seats" sorts={@sorts} align="right">Seats</.sort_header>
+            <.sort_header table={@id} column="previous_seats" sorts={@sorts} align="right">
+              {@previous_year}
+            </.sort_header>
+            <.sort_header
+              :if={@show_councils}
+              table={@id}
+              column="councils"
+              sorts={@sorts}
+              align="right"
+            >
+              Councils won
+            </.sort_header>
+            <.sort_header
+              :if={@show_councils}
+              table={@id}
+              column="previous_councils"
+              sorts={@sorts}
+              align="right"
+            >
+              {@previous_year}
+            </.sort_header>
           </tr>
         </thead>
         <tbody>
-          <tr :for={{party_result, previous} <- @rows} id={"#{@id}-party-#{party_result.party_id}"}>
-            <td><.party_label parties={@parties} party_result={party_result} /></td>
-            <td class="text-right tabular-nums">{format_number(party_result.total_valid_votes)}</td>
-            <td class="text-right tabular-nums">
-              {format_percentage(party_result.vote_percentage)}
-            </td>
+          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-party-#{row.party_id}"}>
+            <td><.party_label parties={@parties} party_result={row} /></td>
+            <td class="text-right tabular-nums">{format_number(row.votes)}</td>
+            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
             <td class="text-right tabular-nums opacity-60">
-              {format_percentage(previous && previous.vote_percentage)}
+              {format_percentage(row.previous_share)}
             </td>
-            <td class={["text-right tabular-nums", delta_class(swing(party_result, previous))]}>
-              {format_delta(swing(party_result, previous), :points)}
+            <td class={["text-right tabular-nums", delta_class(row.swing)]}>
+              {format_delta(row.swing, :points)}
             </td>
-            <td class="text-right tabular-nums">{format_number(party_result.total_seats_won)}</td>
-            <td class="text-right tabular-nums opacity-60">
-              {format_number(previous && previous.total_seats_won)}
-            </td>
+            <td class="text-right tabular-nums">{format_number(row.seats)}</td>
+            <td class="text-right tabular-nums opacity-60">{format_number(row.previous_seats)}</td>
             <td :if={@show_councils} class="text-right tabular-nums">
-              {format_number(party_result.councils_won)}
+              {format_number(row.councils)}
             </td>
             <td :if={@show_councils} class="text-right tabular-nums opacity-60">
-              {format_number(previous && previous.councils_won)}
+              {format_number(row.previous_councils)}
             </td>
           </tr>
         </tbody>
       </table>
-      <p :if={is_nil(@previous_election)} class="text-sm opacity-60 mt-2">
-        No {@previous_year} results for this area.
-      </p>
     </div>
     """
   end
 
-  defp swing(_party_result, nil), do: nil
+  attr :id, :string, required: true
+  attr :rows, :list, required: true, doc: "from IecWeb.TableRows.area_rows/4"
+  attr :parties, :map, required: true
+  attr :previous_year, :integer, required: true
+  attr :sorts, :map, required: true
+  attr :area_label, :string, required: true
+  attr :area_path, :any, required: true, doc: "area id → path"
+  attr :show_council, :boolean, default: false
 
-  defp swing(party_result, previous),
-    do: Float.round(party_result.vote_percentage - previous.vote_percentage, 2)
+  @doc "Areas with how far their count is, who leads now and who led before. Sortable."
+  def area_table(assigns) do
+    ~H"""
+    <div class="overflow-x-auto">
+      <table id={@id} class="table table-sm">
+        <thead>
+          <tr>
+            <.sort_header table={@id} column="name" sorts={@sorts} first="asc">
+              {@area_label}
+            </.sort_header>
+            <.sort_header table={@id} column="counted" sorts={@sorts} align="right">
+              Districts counted
+            </.sort_header>
+            <.sort_header :if={@show_council} table={@id} column="council" sorts={@sorts} first="asc">
+              Council
+            </.sort_header>
+            <.sort_header table={@id} column="leader" sorts={@sorts} first="asc">
+              Leading
+            </.sort_header>
+            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Share</.sort_header>
+            <.sort_header table={@id} column="previous_leader" sorts={@sorts} first="asc">
+              {@previous_year} leader
+            </.sort_header>
+            <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
+              {@previous_year} share
+            </.sort_header>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={row <- sort_rows(@rows, @sorts[@id])} id={"#{@id}-#{row.area_id}"}>
+            <td><.link navigate={@area_path.(row.area_id)} class="link">{row.name}</.link></td>
+            <td class="text-right tabular-nums">{format_progress(row.counted)}</td>
+            <td :if={@show_council}>
+              <.council_control :if={row.complete} parties={@parties} control={row.control} />
+              <span :if={not row.complete} class="badge badge-ghost badge-sm">counting</span>
+            </td>
+            <td><.party_or_dash parties={@parties} party_id={row.leader_id} /></td>
+            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
+            <td class="opacity-60">
+              <.party_or_dash parties={@parties} party_id={row.previous_leader_id} />
+            </td>
+            <td class="text-right tabular-nums opacity-60">
+              {format_percentage(row.previous_share)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
 
   attr :parties, :map, required: true
-  attr :snapshot, :any, required: true
-  attr :muted, :boolean, default: false
+  attr :party_id, :integer, default: nil
+  attr :empty, :string, default: "–"
 
-  @doc "Two table cells: the leading party of a snapshot and its share."
-  def leader_cells(assigns) do
-    assigns = assign(assigns, :leader, leader(assigns.snapshot))
-
+  @doc "A party's label, or a dash (or `empty`) when there is none."
+  def party_or_dash(assigns) do
     ~H"""
-    <td class={@muted && "opacity-60"}>
-      <.party_label :if={@leader} parties={@parties} party_result={@leader} />
-      <span :if={is_nil(@leader)}>–</span>
-    </td>
-    <td class={["text-right tabular-nums", @muted && "opacity-60"]}>
-      {format_percentage(@leader && @leader.vote_percentage)}
-    </td>
+    <.party_label :if={@party_id} parties={@parties} party_result={%{party_id: @party_id}} />
+    <span :if={is_nil(@party_id)} class="opacity-60">{@empty}</span>
     """
   end
 
@@ -373,9 +416,9 @@ defmodule IecWeb.ResultsComponents do
         </.link>
         <span :if={Change.first?(@change)} class="badge badge-ghost badge-sm">first seen</span>
         <span :if={@change.leader} class="badge badge-warning badge-sm">
-          lead: {leader_name(@parties, elem(@change.leader, 0))} → {leader_name(
+          lead: {leader_name(@parties, @change.leader.from)} → {leader_name(
             @parties,
-            elem(@change.leader, 1)
+            @change.leader.to
           )}
         </span>
       </div>

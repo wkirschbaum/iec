@@ -75,7 +75,8 @@ To start again from nothing: `mix ecto.reset`.
 - `/changes`: every change, filterable by level
 
 Every page updates live, and a sticky footer shows how far the count is and when the feed
-was last checked.
+was last checked. Every table sorts by any column: click a heading, click again to
+reverse.
 
 ## Where the data comes from
 

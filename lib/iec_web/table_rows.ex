@@ -1,0 +1,92 @@
+defmodule IecWeb.TableRows do
+  @moduledoc """
+  Builds the rows the tables render: flat maps with one field per column, already
+  formatted for sorting (party abbreviations, swings, council control labels). Templates
+  only display them, and `IecWeb.Sorting` sorts them by field.
+  """
+
+  import IecWeb.ResultsComponents, only: [party_abbreviation: 2, percentage_of: 2]
+
+  alias Iec.Results
+  alias Iec.Results.Snapshot
+
+  @doc "One row per party in a snapshot, against the same party in the previous election."
+  def party_rows(%Snapshot{} = snapshot, previous_snapshot, parties) do
+    previous_by_party =
+      Map.new((previous_snapshot && previous_snapshot.party_results) || [], &{&1.party_id, &1})
+
+    snapshot.party_results
+    |> Enum.sort_by(&(-(&1.total_valid_votes || 0)))
+    |> Enum.map(fn party_result ->
+      previous = previous_by_party[party_result.party_id]
+
+      %{
+        party_id: party_result.party_id,
+        party_name: party_result.party_name,
+        party: party_abbreviation(parties, party_result),
+        votes: party_result.total_valid_votes,
+        share: party_result.vote_percentage,
+        previous_share: previous && previous.vote_percentage,
+        swing: Results.swing(party_result.vote_percentage, previous && previous.vote_percentage),
+        seats: party_result.total_seats_won,
+        previous_seats: previous && previous.total_seats_won,
+        councils: party_result.councils_won,
+        previous_councils: previous && previous.councils_won
+      }
+    end)
+  end
+
+  def party_rows(nil, _previous_snapshot, _parties), do: []
+
+  @doc """
+  One row per area (provinces on the national page, municipalities on a province page):
+  how far its count is, who leads now and who led before. `control` adds who runs each
+  council, from `Iec.Parties.get_council_control/1`.
+  """
+  def area_rows(snapshots, previous_by_area, parties, control \\ %{}) do
+    for snapshot <- snapshots do
+      leader = Results.leading_party(snapshot)
+      previous_leader = Results.leading_party(previous_by_area[snapshot.area_id])
+      complete = snapshot.municipalities_complete == snapshot.municipalities_expected
+      council = control[snapshot.area_id]
+
+      %{
+        area_id: snapshot.area_id,
+        name: snapshot.area_name,
+        counted:
+          percentage_of(snapshot.voting_districts_complete, snapshot.voting_districts_expected),
+        leader_id: leader && leader.party_id,
+        leader: leader && party_abbreviation(parties, leader),
+        share: leader && leader.vote_percentage,
+        previous_leader_id: previous_leader && previous_leader.party_id,
+        previous_leader: previous_leader && party_abbreviation(parties, previous_leader),
+        previous_share: previous_leader && previous_leader.vote_percentage,
+        complete: complete,
+        control: council,
+        council: if(complete, do: council_label(council, parties, false), else: "counting")
+      }
+    end
+  end
+
+  @doc """
+  Who runs a council, as sortable text: "ANC majority", "hung (ANC)", or while counting
+  "ANC leading"; nil when unknown.
+  """
+  def council_label(%{majority: party_id}, parties, _counting) when not is_nil(party_id),
+    do: "#{party_abbreviation(parties, %{party_id: party_id})} majority"
+
+  def council_label(%{largest: party_id}, parties, counting) when not is_nil(party_id) do
+    name = party_abbreviation(parties, %{party_id: party_id})
+    if counting, do: "#{name} leading", else: "hung (#{name})"
+  end
+
+  def council_label(_control, _parties, _counting), do: nil
+
+  @doc "Adds the sortable name of the party in `field` (a party id) as `label_field`."
+  def with_party_name(rows, parties, field, label_field) do
+    Enum.map(rows, fn row ->
+      party_id = Map.get(row, field)
+      Map.put(row, label_field, party_id && party_abbreviation(parties, %{party_id: party_id}))
+    end)
+  end
+end

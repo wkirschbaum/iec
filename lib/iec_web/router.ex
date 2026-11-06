@@ -17,13 +17,16 @@ defmodule IecWeb.Router do
   scope "/", IecWeb do
     pipe_through :browser
 
-    live "/", NationalLive
-    live "/provinces/:id", ProvinceLive
-    live "/municipalities/:id", MunicipalityLive
-    live "/changes", ChangesLive
-    live "/movers", MoversLive
-    live "/map", MapLive
-    live "/parties/:id", PartyLive
+    # Every table on every page can be sorted by its columns.
+    live_session :results, on_mount: IecWeb.Sorting do
+      live "/", NationalLive
+      live "/provinces/:id", ProvinceLive
+      live "/municipalities/:id", MunicipalityLive
+      live "/changes", ChangesLive
+      live "/movers", MoversLive
+      live "/map", MapLive
+      live "/parties/:id", PartyLive
+    end
   end
 
   # Other scopes may use custom stacks.

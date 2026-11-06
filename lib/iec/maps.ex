@@ -162,11 +162,11 @@ defmodule Iec.Maps do
   def list_area_results(level, area_ids) when level in [:province, :municipality] do
     previous_leaders =
       Results.list_latest_snapshots(election: Results.previous_year(), level: level)
-      |> Map.new(&{&1.area_id, leader_of(&1)})
+      |> Map.new(&{&1.area_id, Results.leading_party(&1)})
 
     for snapshot <- Results.list_latest_snapshots(level: level),
         snapshot.area_id in area_ids,
-        leader = leader_of(snapshot),
+        leader = Results.leading_party(snapshot),
         into: %{} do
       status =
         cond do
@@ -213,11 +213,5 @@ defmodule Iec.Maps do
          previous_leader: previous_leader && previous_leader.party_id
        }}
     end
-  end
-
-  defp leader_of(snapshot) do
-    snapshot.party_results
-    |> Enum.filter(&(&1.party_id >= 0 and (&1.total_valid_votes || 0) > 0))
-    |> Enum.max_by(& &1.total_valid_votes, fn -> nil end)
   end
 end

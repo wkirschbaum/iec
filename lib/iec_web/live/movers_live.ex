@@ -4,6 +4,7 @@ defmodule IecWeb.MoversLive do
   import IecWeb.ResultsComponents
 
   alias Iec.{Parties, Results}
+  alias IecWeb.TableRows
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
@@ -33,7 +34,20 @@ defmodule IecWeb.MoversLive do
       losers: by_swing |> Enum.filter(&(&1.swing < 0)) |> Enum.reverse(),
       ward_net: net.(:wards_gained, :wards_lost),
       council_net: net.(:councils_gained, :councils_lost),
-      local_swings: movers.local_swings
+      local_rises:
+        TableRows.with_party_name(
+          movers.local_swings.rises,
+          socket.assigns.parties,
+          :party_id,
+          :party
+        ),
+      local_falls:
+        TableRows.with_party_name(
+          movers.local_swings.falls,
+          socket.assigns.parties,
+          :party_id,
+          :party
+        )
     )
   end
 
@@ -93,16 +107,18 @@ defmodule IecWeb.MoversLive do
         <.local_swings
           id="local-rises"
           title="Biggest local surges"
-          rows={@local_swings.rises}
+          rows={@local_rises}
           parties={@parties}
           previous_year={@previous_year}
+          sorts={@sorts}
         />
         <.local_swings
           id="local-falls"
           title="Biggest local collapses"
-          rows={@local_swings.falls}
+          rows={@local_falls}
           parties={@parties}
           previous_year={@previous_year}
+          sorts={@sorts}
         />
       </section>
     </Layouts.app>
@@ -247,6 +263,7 @@ defmodule IecWeb.MoversLive do
   attr :title, :string, required: true
   attr :rows, :list, required: true
   attr :parties, :map, required: true
+  attr :sorts, :map, required: true
   attr :previous_year, :integer, required: true
 
   defp local_swings(assigns) do
@@ -257,15 +274,22 @@ defmodule IecWeb.MoversLive do
       <table :if={@rows != []} class="table table-sm">
         <thead>
           <tr>
-            <th>Party</th>
-            <th>Municipality</th>
-            <th class="text-right">{@previous_year}</th>
-            <th class="text-right">Now</th>
-            <th class="text-right">Swing</th>
+            <.sort_header table={@id} column="party" sorts={@sorts} first="asc">Party</.sort_header>
+            <.sort_header table={@id} column="municipality_name" sorts={@sorts} first="asc">
+              Municipality
+            </.sort_header>
+            <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
+              {@previous_year}
+            </.sort_header>
+            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Now</.sort_header>
+            <.sort_header table={@id} column="swing" sorts={@sorts} align="right">Swing</.sort_header>
           </tr>
         </thead>
         <tbody>
-          <tr :for={row <- @rows} id={"#{@id}-#{row.party_id}-#{row.municipality_id}"}>
+          <tr
+            :for={row <- sort_rows(@rows, @sorts[@id])}
+            id={"#{@id}-#{row.party_id}-#{row.municipality_id}"}
+          >
             <td><.party_label parties={@parties} party_result={row} /></td>
             <td>
               <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">

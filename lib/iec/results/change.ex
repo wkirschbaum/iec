@@ -19,7 +19,7 @@ defmodule Iec.Results.Change do
 
     * `progress` – `{label, delta, now}` for each counter that moved
     * `parties` – `%{party_id, party_name, votes, seats, percentage}` deltas, biggest vote gain first
-    * `leader` – `{from, to}` (`%{party_id, party_name}`) when the vote leader changed
+    * `leader` – `%{from, to}` (each `%{party_id, party_name}`) when the vote leader changed
   """
   def compare(%Snapshot{previous_snapshot: previous} = snapshot) when not is_nil(previous) do
     progress =
@@ -51,7 +51,7 @@ defmodule Iec.Results.Change do
     leader =
       case {leader(previous), leader(snapshot)} do
         {same, same} -> nil
-        {from, to} -> {from, to}
+        {from, to} -> %{from: from, to: to}
       end
 
     %__MODULE__{
@@ -68,8 +68,8 @@ defmodule Iec.Results.Change do
   @doc "True when this is the area's first snapshot."
   def first?(%__MODULE__{previous: previous}), do: is_nil(previous)
 
-  defp leader(%Snapshot{party_results: party_results}) do
-    case Enum.max_by(party_results, &(&1.total_valid_votes || 0), fn -> nil end) do
+  defp leader(snapshot) do
+    case Iec.Results.leading_party(snapshot) do
       nil -> nil
       party -> %{party_id: party.party_id, party_name: party.party_name}
     end
