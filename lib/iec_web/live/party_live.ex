@@ -8,6 +8,10 @@ defmodule IecWeb.PartyLive do
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
 
+  # Long lists open collapsed and show this many rows until "Show all".
+  @collapsed_by_default ["municipalities-kept", "wards-pending", "wards-held"]
+  @row_limit 25
+
   @impl Phoenix.LiveView
   def mount(%{"id" => id}, _session, socket) do
     party_id = String.to_integer(id)
@@ -18,10 +22,36 @@ defmodule IecWeb.PartyLive do
      |> assign(
        party_id: party_id,
        live_year: Results.live_year(),
-       previous_year: Results.previous_year()
+       previous_year: Results.previous_year(),
+       closed_sections: MapSet.new(@collapsed_by_default),
+       expanded_sections: MapSet.new()
      )
      |> refresh()}
   end
+
+  @impl Phoenix.LiveView
+  def handle_event("toggle_section", %{"section" => section}, socket) do
+    {:noreply, update(socket, :closed_sections, &toggle(&1, section))}
+  end
+
+  def handle_event("show_all", %{"section" => section}, socket) do
+    {:noreply, update(socket, :expanded_sections, &MapSet.put(&1, section))}
+  end
+
+  defp toggle(set, member),
+    do:
+      if(MapSet.member?(set, member),
+        do: MapSet.delete(set, member),
+        else: MapSet.put(set, member)
+      )
+
+  defp visible_rows(rows, :infinity), do: rows
+  defp visible_rows(rows, limit), do: Enum.take(rows, limit)
+
+  defp open?(closed_sections, section), do: not MapSet.member?(closed_sections, section)
+
+  defp row_limit(expanded_sections, section),
+    do: if(MapSet.member?(expanded_sections, section), do: :infinity, else: @row_limit)
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
@@ -207,6 +237,8 @@ defmodule IecWeb.PartyLive do
         <h2 class="text-xl font-semibold">Councils</h2>
         <.municipality_table
           id="municipalities-gained"
+          open={open?(@closed_sections, "municipalities-gained")}
+          limit={row_limit(@expanded_sections, "municipalities-gained")}
           title="Majority gained"
           rows={@municipalities[:gained] || []}
           parties={@parties}
@@ -217,6 +249,8 @@ defmodule IecWeb.PartyLive do
         />
         <.municipality_table
           id="municipalities-lost-to-party"
+          open={open?(@closed_sections, "municipalities-lost-to-party")}
+          limit={row_limit(@expanded_sections, "municipalities-lost-to-party")}
           title="Majority lost to another party"
           rows={@municipalities[:lost_to_party] || []}
           parties={@parties}
@@ -227,6 +261,8 @@ defmodule IecWeb.PartyLive do
         />
         <.municipality_table
           id="municipalities-lost-hung"
+          open={open?(@closed_sections, "municipalities-lost-hung")}
+          limit={row_limit(@expanded_sections, "municipalities-lost-hung")}
           title="Majority lost to a hung council"
           rows={@municipalities[:lost_hung] || []}
           parties={@parties}
@@ -237,6 +273,8 @@ defmodule IecWeb.PartyLive do
         />
         <.municipality_table
           id="municipalities-pending"
+          open={open?(@closed_sections, "municipalities-pending")}
+          limit={row_limit(@expanded_sections, "municipalities-pending")}
           title={"Held in #{@previous_year} · #{@live_year} count in progress"}
           rows={@municipalities[:pending] || []}
           parties={@parties}
@@ -248,12 +286,13 @@ defmodule IecWeb.PartyLive do
         />
         <.municipality_table
           id="municipalities-kept"
+          open={open?(@closed_sections, "municipalities-kept")}
+          limit={row_limit(@expanded_sections, "municipalities-kept")}
           title="Majority kept"
           rows={@municipalities[:kept] || []}
           parties={@parties}
           party_id={@party_id}
           previous_year={@previous_year}
-          collapsed
         />
       </section>
 
@@ -264,6 +303,8 @@ defmodule IecWeb.PartyLive do
         </p>
         <.ward_table
           id="wards-gained"
+          open={open?(@closed_sections, "wards-gained")}
+          limit={row_limit(@expanded_sections, "wards-gained")}
           title="Gained"
           rows={@wards[:gained] || []}
           parties={@parties}
@@ -273,6 +314,8 @@ defmodule IecWeb.PartyLive do
         />
         <.ward_table
           id="wards-lost"
+          open={open?(@closed_sections, "wards-lost")}
+          limit={row_limit(@expanded_sections, "wards-lost")}
           title="Lost"
           rows={@wards[:lost] || []}
           parties={@parties}
@@ -282,19 +325,21 @@ defmodule IecWeb.PartyLive do
         />
         <.ward_table
           id="wards-pending"
+          open={open?(@closed_sections, "wards-pending")}
+          limit={row_limit(@expanded_sections, "wards-pending")}
           title={"Held in #{@previous_year} · #{@live_year} result not declared yet"}
           rows={@wards[:pending] || []}
           parties={@parties}
           previous_year={@previous_year}
-          collapsed
         />
         <.ward_table
           id="wards-held"
+          open={open?(@closed_sections, "wards-held")}
+          limit={row_limit(@expanded_sections, "wards-held")}
           title="Held"
           rows={@wards[:held] || []}
           parties={@parties}
           previous_year={@previous_year}
-          collapsed
         />
       </section>
     </Layouts.app>
@@ -423,19 +468,14 @@ defmodule IecWeb.PartyLive do
   attr :other_label, :string, default: nil
   attr :other_control, :atom, default: nil
   attr :counting, :boolean, default: false
-  attr :collapsed, :boolean, default: false
+  attr :open, :boolean, required: true
+  attr :limit, :any, required: true, doc: "rows to show, or :infinity"
 
   defp municipality_table(assigns) do
     ~H"""
-    <details
-      id={@id}
-      open={not @collapsed and @rows != []}
-      phx-mounted={JS.ignore_attributes(["open"])}
-    >
-      <summary class="cursor-pointer font-medium">
-        {@title} <span class="badge badge-sm">{length(@rows)}</span>
-      </summary>
-      <div :if={@rows != []} class="overflow-x-auto mt-2">
+    <section id={@id}>
+      <.section_toggle id={@id} title={@title} count={length(@rows)} open={@open} />
+      <div :if={@open and @rows != []} class="overflow-x-auto mt-2">
         <table class="table table-sm">
           <thead>
             <tr>
@@ -449,7 +489,7 @@ defmodule IecWeb.PartyLive do
             </tr>
           </thead>
           <tbody>
-            <tr :for={row <- @rows} id={"#{@id}-#{row.municipality_id}"}>
+            <tr :for={row <- visible_rows(@rows, @limit)} id={"#{@id}-#{row.municipality_id}"}>
               <td>
                 <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
                   {row.name}
@@ -475,8 +515,9 @@ defmodule IecWeb.PartyLive do
             </tr>
           </tbody>
         </table>
+        <.show_all id={@id} shown={min(@limit, length(@rows))} total={length(@rows)} />
       </div>
-    </details>
+    </section>
     """
   end
 
@@ -487,19 +528,14 @@ defmodule IecWeb.PartyLive do
   attr :previous_year, :integer, required: true
   attr :other_label, :string, default: nil
   attr :other_party, :atom, default: nil
-  attr :collapsed, :boolean, default: false
+  attr :open, :boolean, required: true
+  attr :limit, :any, required: true, doc: "rows to show, or :infinity"
 
   defp ward_table(assigns) do
     ~H"""
-    <details
-      id={@id}
-      open={not @collapsed and @rows != []}
-      phx-mounted={JS.ignore_attributes(["open"])}
-    >
-      <summary class="cursor-pointer font-medium">
-        {@title} <span class="badge badge-sm">{length(@rows)}</span>
-      </summary>
-      <div :if={@rows != []} class="overflow-x-auto mt-2">
+    <section id={@id}>
+      <.section_toggle id={@id} title={@title} count={length(@rows)} open={@open} />
+      <div :if={@open and @rows != []} class="overflow-x-auto mt-2">
         <table class="table table-sm">
           <thead>
             <tr>
@@ -512,7 +548,7 @@ defmodule IecWeb.PartyLive do
             </tr>
           </thead>
           <tbody>
-            <tr :for={row <- @rows} id={"#{@id}-#{row.ward_id}"}>
+            <tr :for={row <- visible_rows(@rows, @limit)} id={"#{@id}-#{row.ward_id}"}>
               <td>
                 <.link
                   :if={row.municipality_id}
@@ -546,8 +582,50 @@ defmodule IecWeb.PartyLive do
             </tr>
           </tbody>
         </table>
+        <.show_all id={@id} shown={min(@limit, length(@rows))} total={length(@rows)} />
       </div>
-    </details>
+    </section>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :count, :integer, required: true
+  attr :open, :boolean, required: true
+
+  defp section_toggle(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class="flex cursor-pointer items-center gap-2 font-medium"
+      phx-click="toggle_section"
+      phx-value-section={@id}
+      aria-expanded={to_string(@open)}
+    >
+      <.icon
+        name="hero-chevron-right-micro"
+        class={["size-4 transition-transform", @open && @count > 0 && "rotate-90"]}
+      />
+      {@title} <span class="badge badge-sm">{@count}</span>
+    </button>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :shown, :integer, required: true
+  attr :total, :integer, required: true
+
+  defp show_all(assigns) do
+    ~H"""
+    <button
+      :if={@shown < @total}
+      type="button"
+      class="btn btn-ghost btn-sm mt-2"
+      phx-click="show_all"
+      phx-value-section={@id}
+    >
+      Show all {@total} <span class="opacity-60">(showing {@shown})</span>
+    </button>
     """
   end
 end

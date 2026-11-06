@@ -9,6 +9,8 @@ defmodule IecWeb.ChangesLive do
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results]}
 
+  @page_size 100
+
   @levels %{"national" => :national, "province" => :province, "municipality" => :municipality}
   @filters [
     {"All", nil},
@@ -19,24 +21,38 @@ defmodule IecWeb.ChangesLive do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "Changes", filters: @filters)}
+    {:ok, assign(socket, page_title: "Changes", filters: @filters, limit: @page_size)}
   end
 
   @impl Phoenix.LiveView
   def handle_params(params, _uri, socket) do
     {:noreply,
      socket
-     |> assign(level: Map.get(@levels, params["level"]), include_first: params["first"] == "1")
+     |> assign(
+       level: Map.get(@levels, params["level"]),
+       include_first: params["first"] == "1",
+       limit: @page_size
+     )
      |> refresh()}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("load_more", _params, socket) do
+    {:noreply, socket |> update(:limit, &(&1 + @page_size)) |> refresh()}
   end
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
     filters =
-      [limit: 300, changed_only: not socket.assigns.include_first] ++
+      [limit: socket.assigns.limit + 1, changed_only: not socket.assigns.include_first] ++
         if(socket.assigns.level, do: [level: socket.assigns.level], else: [])
 
-    assign(socket, changes: Results.list_changes(filters) |> Enum.map(&Change.compare/1))
+    changes = Results.list_changes(filters)
+
+    assign(socket,
+      changes: changes |> Enum.take(socket.assigns.limit) |> Enum.map(&Change.compare/1),
+      more: length(changes) > socket.assigns.limit
+    )
   end
 
   @impl Phoenix.LiveView
@@ -73,6 +89,10 @@ defmodule IecWeb.ChangesLive do
       <ul id="changes" class="divide-y divide-base-300">
         <.change_entry :for={change <- @changes} change={change} parties={@parties} />
       </ul>
+
+      <button :if={@more} type="button" class="btn btn-ghost btn-sm" phx-click="load_more">
+        Load more
+      </button>
     </Layouts.app>
     """
   end

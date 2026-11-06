@@ -62,8 +62,8 @@ To start again from nothing: `mix ecto.reset`.
   latest changes
 - `/map`: the map at province, municipality or ward level, for the whole country or one
   province: each area in its leading party's colour (stronger for a bigger lead,
-  hatched while counting), or only the areas that changed hands since 2021. Hover for
-  details, click to open the area
+  hatched while counting), or only the areas that changed hands since 2021. Scroll, pinch
+  or use the buttons to zoom, drag to move, hover for details, click to open an area
 - `/provinces/:id`: parties vs 2021, a map of its municipalities, and each municipality's
   council control and leader, now and in 2021
 - `/municipalities/:id`: council control now and in 2021, every followed party vs 2021,
@@ -96,6 +96,7 @@ Map outlines come from the IEC's election map,
 `https://results.elections.org.za/ElectionMap/MapData/<year>/` (`nationalProvince.js`, `nationalMunic.js`, `nationalWard.js`, GeoJSON). They are
 projected, simplified and stored once as SVG paths (`Iec.Maps.Geometry`), so the maps are
 plain server-rendered SVG: on each update LiveView sends only the areas whose colour changed.
+The live websocket is compressed, and long lists render 25 rows until you ask for more.
 
 The event ids (`EEID1887` for 2026, `EEID1091` for 2021) come from `var EEID2026` and
 friends in the dashboard's `LGEResultsDashboard.aspx`; they live in `config/config.exs`.

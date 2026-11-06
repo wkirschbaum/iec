@@ -100,6 +100,23 @@ defmodule IecWeb.LiveUpdatesTest do
     end
   end
 
+  test "party page lists show 25 rows until asked, and sections collapse", %{conn: conn} do
+    wards = for ward_id <- 79_800_001..79_800_030, do: ward_id
+    ingest_party_file(2021, 7, Enum.map(wards, &{&1, true}))
+    ingest_party_file(2026, 7, Enum.map(wards, &{&1, false}))
+    ingest_party_file(2026, 52, Enum.map(wards, &{&1, true}))
+
+    {:ok, view, html} = live(conn, ~p"/parties/7")
+    assert length(Regex.scan(~r/id="wards-lost-\d+"/, html)) == 25
+    assert html =~ "Show all 30"
+
+    html = view |> element("#wards-lost button", "Show all") |> render_click()
+    assert length(Regex.scan(~r/id="wards-lost-\d+"/, html)) == 30
+
+    html = view |> element("#wards-lost button", "Lost") |> render_click()
+    assert Regex.scan(~r/id="wards-lost-\d+"/, html) == []
+  end
+
   test "winners and losers follow the count", %{conn: conn} do
     ingest_party_file(2021, 7, [{79_800_001, true}])
     {:ok, view, _html} = live(conn, ~p"/movers")
