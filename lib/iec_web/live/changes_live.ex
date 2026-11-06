@@ -33,7 +33,14 @@ defmodule IecWeb.ChangesLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    %{view: view, level: level, limit: limit} = socket.assigns
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(assigns), do: {__MODULE__, assigns.view, assigns.level, assigns.limit}
+
+  defp load(assigns) do
+    %{view: view, level: level, limit: limit} = assigns
     filters = [changed_only: true] ++ if(level, do: [level: level], else: [])
 
     # Highlights read further back: rounds are built from many areas' changes.
@@ -41,7 +48,7 @@ defmodule IecWeb.ChangesLive do
       Results.list_changes(filters ++ [limit: if(view == :all, do: limit + 1, else: limit * 4)])
       |> Enum.map(&Change.compare/1)
 
-    assign(socket,
+    Map.new(
       changes: Enum.take(changes, limit),
       more: view == :all and length(changes) > limit,
       rounds: if(view == :highlights, do: ChangeDigest.rounds(changes), else: [])

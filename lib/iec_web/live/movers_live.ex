@@ -20,6 +20,13 @@ defmodule IecWeb.MoversLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(_assigns), do: {__MODULE__}
+
+  defp load(assigns) do
     movers = Parties.get_movers()
     by_swing = Enum.sort_by(movers.parties, & &1.swing, :desc)
 
@@ -30,7 +37,7 @@ defmodule IecWeb.MoversLive do
       |> Enum.sort_by(& &1.net, :desc)
     end
 
-    assign(socket,
+    Map.new(
       winners: Enum.filter(by_swing, &(&1.swing > 0)),
       losers: by_swing |> Enum.filter(&(&1.swing < 0)) |> Enum.reverse(),
       ward_net: net.(:wards_gained, :wards_lost),
@@ -38,14 +45,14 @@ defmodule IecWeb.MoversLive do
       local_rises:
         TableRows.with_party_name(
           movers.local_swings.rises,
-          socket.assigns.parties,
+          assigns.parties,
           :party_id,
           :party
         ),
       local_falls:
         TableRows.with_party_name(
           movers.local_swings.falls,
-          socket.assigns.parties,
+          assigns.parties,
           :party_id,
           :party
         )

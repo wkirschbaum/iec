@@ -18,7 +18,14 @@ defmodule IecWeb.TrendsLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    %{parties: parties, live_year: live_year} = socket.assigns
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(_assigns), do: {__MODULE__}
+
+  defp load(assigns) do
+    %{parties: parties, live_year: live_year} = assigns
     national = Results.list_snapshots_by_election(:national, 0)
     share = Trends.series(national, :vote_percentage, parties, threshold: 2.5)
     counting = counting?(national, live_year)
@@ -37,7 +44,7 @@ defmodule IecWeb.TrendsLive do
 
     totals = Trends.totals(national)
 
-    assign(socket,
+    Map.new(
       counting: counting,
       share: share,
       seats: Trends.series(national, :total_seats_won, parties, threshold: 100, limit: 6),

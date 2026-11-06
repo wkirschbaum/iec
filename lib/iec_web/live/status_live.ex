@@ -20,11 +20,14 @@ defmodule IecWeb.StatusLive do
   @impl Phoenix.LiveView
   def handle_info(:tick, socket), do: {:noreply, refresh(socket)}
 
-  # Feed statuses arrive through IecWeb.LiveUpdates as @feed_statuses; the rest is read
-  # here, after every update and every ten seconds.
+  # Read after every update and every ten seconds; party feeds are not broadcast to pages.
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    assign(socket, system: Status.system(), imports: Status.imports())
+    assign(socket,
+      system: Status.system(),
+      imports: Status.imports(),
+      feed_statuses: Iec.Results.Poller.statuses()
+    )
   end
 
   @impl Phoenix.LiveView

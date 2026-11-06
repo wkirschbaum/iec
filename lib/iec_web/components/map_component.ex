@@ -93,7 +93,12 @@ defmodule IecWeb.MapComponent do
   # Colours every area and streams only those whose look changed since the last render.
   defp restyle(socket) do
     %{boundaries: boundaries, level: level, mode: mode, parties: parties} = socket.assigns
-    results = Maps.list_area_results(level, Enum.map(boundaries, & &1.area_id))
+
+    # Shared by every viewer of the same map, computed once per data change.
+    results =
+      Iec.Cache.fetch({:area_results, socket.assigns.shape_key}, fn ->
+        Maps.list_area_results(level, Enum.map(boundaries, & &1.area_id))
+      end)
 
     areas =
       for boundary <- boundaries do

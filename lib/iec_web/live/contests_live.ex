@@ -41,7 +41,14 @@ defmodule IecWeb.ContestsLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    parties = socket.assigns.parties
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(_assigns), do: {__MODULE__}
+
+  defp load(assigns) do
+    parties = assigns.parties
     councils = TableRows.council_contest_rows(Contests.list_council_contests(), parties)
     wards = TableRows.ward_contest_rows(Contests.list_ward_contests(), parties)
     settled = Enum.filter(councils, &(&1.complete or &1.counted >= @minimum_counted))
@@ -49,7 +56,7 @@ defmodule IecWeb.ContestsLive do
     closest_council = List.first(settled)
     closest_ward = List.first(wards)
 
-    assign(socket,
+    Map.new(
       council_rows: councils,
       ward_rows: wards,
       knife_edge: Enum.take(settled, @cards),

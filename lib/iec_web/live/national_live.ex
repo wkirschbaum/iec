@@ -26,7 +26,14 @@ defmodule IecWeb.NationalLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    %{previous_year: previous_year, parties: parties} = socket.assigns
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(_assigns), do: {__MODULE__}
+
+  defp load(assigns) do
+    %{previous_year: previous_year, parties: parties} = assigns
     national = Results.get_latest_snapshot(:national, 0)
     previous_national = Results.get_latest_snapshot(:national, 0, election: previous_year)
     party_rows = TableRows.party_rows(national, previous_national, parties)
@@ -35,7 +42,7 @@ defmodule IecWeb.NationalLive do
       Results.list_latest_snapshots(election: previous_year, level: :province)
       |> Map.new(&{&1.area_id, &1})
 
-    assign(socket,
+    Map.new(
       national: national,
       summary: Narrative.summary(national, party_rows, parties, previous_year),
       trend:

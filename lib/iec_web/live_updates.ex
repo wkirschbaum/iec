@@ -20,6 +20,8 @@ defmodule IecWeb.LiveUpdates do
 
   # Configurable so tests need not wait.
   @refresh_delay Application.compile_env(:iec, [IecWeb.LiveUpdates, :refresh_delay], 1_000)
+  # A crowd of pages refreshing at once is spread over this many more milliseconds.
+  @refresh_spread Application.compile_env(:iec, [IecWeb.LiveUpdates, :refresh_spread], 2_000)
 
   @callback refresh(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
 
@@ -33,9 +35,9 @@ defmodule IecWeb.LiveUpdates do
     {:cont,
      socket
      |> assign(
-       parties: Results.parties_by_id(),
+       parties: Iec.Cache.fetch(:parties, &Results.parties_by_id/0),
        feed_statuses: Poller.statuses(),
-       count_progress: Results.get_count_progress(),
+       count_progress: Iec.Cache.fetch(:count_progress, &Results.get_count_progress/0),
        refresh_scheduled: false,
        refreshed_at: System.monotonic_time()
      )
@@ -51,11 +53,11 @@ defmodule IecWeb.LiveUpdates do
   end
 
   defp handle_info(:parties_refreshed, socket) do
-    {:halt, assign(socket, :parties, Results.parties_by_id())}
+    {:halt, assign(socket, :parties, Iec.Cache.fetch(:parties, &Results.parties_by_id/0))}
   end
 
   defp handle_info(:refresh, socket) do
-    count_progress = Results.get_count_progress()
+    count_progress = Iec.Cache.fetch(:count_progress, &Results.get_count_progress/0)
 
     {:halt,
      socket
@@ -81,10 +83,12 @@ defmodule IecWeb.LiveUpdates do
   defp announce_count_change(socket, same, same), do: socket
   defp announce_count_change(socket, _before, _now), do: push_event(socket, "count-updated", %{})
 
+  defp spread, do: if(@refresh_spread > 0, do: :rand.uniform(@refresh_spread), else: 0)
+
   defp schedule_refresh(%{assigns: %{refresh_scheduled: true}} = socket), do: socket
 
   defp schedule_refresh(socket) do
-    Process.send_after(self(), :refresh, @refresh_delay)
+    Process.send_after(self(), :refresh, @refresh_delay + spread())
     assign(socket, :refresh_scheduled, true)
   end
 

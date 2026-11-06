@@ -25,12 +25,19 @@ defmodule IecWeb.ProvinceLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(assigns), do: {__MODULE__, assigns.province_id}
+
+  defp load(assigns) do
     %{
       province_id: province_id,
       live_year: live_year,
       previous_year: previous_year,
       parties: parties
-    } = socket.assigns
+    } = assigns
 
     province = Results.get_latest_snapshot(:province, province_id)
     municipalities = Results.list_latest_snapshots(level: :municipality, province_id: province_id)
@@ -50,7 +57,7 @@ defmodule IecWeb.ProvinceLive do
 
     party_rows = TableRows.party_rows(province, previous_province, parties)
 
-    assign(socket,
+    Map.new(
       page_title: (province && province.area_name) || "Province",
       province: province,
       previous_province: previous_province,

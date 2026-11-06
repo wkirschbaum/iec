@@ -14,6 +14,7 @@ defmodule Iec.Application do
         {DNSCluster, query: Application.get_env(:iec, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Iec.PubSub},
         {Registry, keys: :unique, name: Iec.Results.Registry},
+        Iec.Cache,
         {Task.Supervisor, name: Iec.TaskSupervisor},
         {DynamicSupervisor, name: Iec.Parties.Pollers, strategy: :one_for_one}
       ] ++

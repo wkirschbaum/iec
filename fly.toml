@@ -28,8 +28,9 @@ kill_signal = "SIGTERM"
 
   [http_service.concurrency]
     type = "connections"
-    hard_limit = 1000
-    soft_limit = 1000
+    # Each open page holds one connection; past the soft limit Fly queues new ones.
+    hard_limit = 10000
+    soft_limit = 8000
 
   [[http_service.checks]]
     grace_period = "30s"

@@ -39,4 +39,7 @@ config :iec, Iec.Results,
   poll: false,
   req_options: [plug: {Req.Test, Iec.Results.Feed}, retry: false]
 
-config :iec, IecWeb.LiveUpdates, refresh_delay: 0
+config :iec, IecWeb.LiveUpdates, refresh_delay: 0, refresh_spread: 0
+
+# Each test changes the data under the pages, so nothing is shared between them.
+config :iec, Iec.Cache, enabled: false

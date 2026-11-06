@@ -71,7 +71,8 @@ defmodule Iec.Results.Poller do
     }
 
     Registry.update_value(@registry, state.feed.name, fn _previous -> status end)
-    Results.broadcast_feed_status(status)
+    # Open pages only show the main feeds' checks; the party files are on /status.
+    if state.feed.kind != :party, do: Results.broadcast_feed_status(status)
     Process.send_after(self(), :poll, delay)
     {:noreply, state}
   end

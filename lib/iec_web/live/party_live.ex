@@ -33,7 +33,14 @@ defmodule IecWeb.PartyLive do
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
-    %{party_id: party_id, parties: parties} = socket.assigns
+    assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
+  end
+
+  # Computed once per data change and shared by everyone viewing the same page.
+  defp cache_key(assigns), do: {__MODULE__, assigns.party_id}
+
+  defp load(assigns) do
+    %{party_id: party_id, parties: parties} = assigns
     overview = Parties.get_party_overview(party_id)
 
     summary =
@@ -41,17 +48,17 @@ defmodule IecWeb.PartyLive do
         overview,
         parties,
         Results.list_area_names(:province),
-        socket.assigns.sections
+        assigns.sections
       )
 
-    assign(socket,
+    Map.new(
       page_title: party_abbreviation(parties, %{party_id: party_id}),
       stats: summary.stats,
       lede:
         Narrative.party(
           summary.stats,
           party_abbreviation(parties, %{party_id: party_id}),
-          socket.assigns.previous_year
+          assigns.previous_year
         ),
       breakdowns: summary.breakdowns,
       province_rows: summary.provinces,

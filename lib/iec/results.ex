@@ -22,7 +22,11 @@ defmodule Iec.Results do
   @doc "Subscribes the caller to `{:results_changed, snapshot_ids}` and `:parties_refreshed`."
   def subscribe, do: Phoenix.PubSub.subscribe(Iec.PubSub, @topic)
 
-  def broadcast(message), do: Phoenix.PubSub.broadcast(Iec.PubSub, @topic, message)
+  @doc "Announces a change in the stored results; cached page data goes stale first."
+  def broadcast(message) do
+    Iec.Cache.invalidate()
+    Phoenix.PubSub.broadcast(Iec.PubSub, @topic, message)
+  end
 
   @doc "Subscribes the caller to `{:feed_status, status}` after every poll of every feed."
   def subscribe_feed_status, do: Phoenix.PubSub.subscribe(Iec.PubSub, @feed_topic)

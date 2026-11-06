@@ -27,7 +27,10 @@ defmodule Iec.Parties do
   @doc "Subscribes the caller to `{:party_results_changed, party_id}` and `:wards_mapped`."
   def subscribe, do: Phoenix.PubSub.subscribe(Iec.PubSub, @topic)
 
-  defp broadcast(message), do: Phoenix.PubSub.broadcast(Iec.PubSub, @topic, message)
+  defp broadcast(message) do
+    Iec.Cache.invalidate()
+    Phoenix.PubSub.broadcast(Iec.PubSub, @topic, message)
+  end
 
   ## Ingesting
 
