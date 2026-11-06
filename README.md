@@ -81,6 +81,8 @@ To start again from nothing: `mix ecto.reset`.
 - `/movers`: biggest winners and losers by vote share swing, wards and council
   majorities changing hands per party, and the biggest local surges and collapses
 - `/changes`: every change, filterable by level
+- `/about`: what this is and is not, data sources and credits, how it works and how to
+  read it
 
 Every page updates live, and a sticky footer shows how far the count is and when the feed
 was last checked. Every table sorts by any column: click a heading, click again to
@@ -145,6 +147,21 @@ minutes old, so the app is about as live as the IEC's own dashboard.
   are listed as "new or redrawn wards won", not as gained or lost, and the map's "changed
   since 2021" view leaves them out.
 - `parties`: names and colours.
+
+## Deploying
+
+It runs on Fly.io at https://iec-results.fly.dev (`fly.toml`, `Dockerfile`, Johannesburg). A
+first deploy needs a Postgres attached and a secret key, both kept as Fly secrets and
+never in the repo:
+
+    fly postgres create --name iec-results-db --region jnb
+    fly postgres attach iec-results-db --app iec-results
+    fly secrets set SECRET_KEY_BASE="$(mix phx.gen.secret)" --app iec-results
+    fly deploy
+
+Migrations run on each deploy, and the app seeds itself in the background on start
+(about five minutes on an empty database). It must keep one machine running, since it
+polls the IEC around the clock.
 
 ## Tests
 

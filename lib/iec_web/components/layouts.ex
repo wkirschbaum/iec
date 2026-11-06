@@ -82,7 +82,19 @@ defmodule IecWeb.Layouts do
             {label}
           </.nav_link>
         </nav>
-        <div class="ml-auto"><.theme_toggle /></div>
+        <div class="ml-auto flex items-center gap-3">
+          <.link
+            navigate={~p"/about"}
+            class={[
+              "rounded-full px-3 py-1.5 text-sm transition-colors",
+              @active == :about && "bg-base-content font-medium text-base-100",
+              @active != :about && "text-base-content/60 hover:bg-base-200 hover:text-base-content"
+            ]}
+          >
+            About
+          </.link>
+          <div class="hidden sm:block"><.theme_toggle /></div>
+        </div>
       </div>
     </header>
 
