@@ -21,7 +21,7 @@ defmodule IecWeb.MunicipalityLive do
     {:ok,
      socket
      |> assign(
-       municipality_id: parse_id(id),
+       municipality_id: IecWeb.Params.id(id),
        parties_shown: @page_size,
        live_year: Results.live_year(),
        previous_year: Results.previous_year()
@@ -33,12 +33,8 @@ defmodule IecWeb.MunicipalityLive do
   def handle_event("show_more", %{"table" => "municipality-parties"}, socket),
     do: {:noreply, update(socket, :parties_shown, &(&1 + @more))}
 
-  defp parse_id(id) do
-    case Integer.parse(id) do
-      {municipality_id, ""} -> municipality_id
-      _not_an_id -> nil
-    end
-  end
+  # Anything else (a stale or crafted event) changes nothing.
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
 
   @impl IecWeb.LiveUpdates
   def refresh(socket) do
@@ -143,9 +139,13 @@ defmodule IecWeb.MunicipalityLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div :if={is_nil(@municipality)} class="panel p-6 text-base-content/70">
-        No results for this municipality yet.
-      </div>
+      <.page_header :if={is_nil(@municipality)} eyebrow="Municipality" title="No results">
+        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
+        <:lede>
+          No results for this municipality yet, or no municipality has this id.
+          <.link navigate={~p"/wards"} class="link">Find a ward or municipality</.link>
+        </:lede>
+      </.page_header>
 
       <div :if={@municipality} class="space-y-12">
         <.page_header
@@ -513,17 +513,9 @@ defmodule IecWeb.MunicipalityLive do
           </tr>
         </tbody>
       </table>
-      <button
-        :if={length(@visible) < @total}
-        type="button"
-        class="btn btn-ghost btn-sm mt-2"
-        phx-click="show_more"
-        phx-value-table={@id}
-      >
-        Show more <span class="opacity-60">({length(@visible)} of {@total})</span>
-      </button>
+      <.show_more table={@id} shown={length(@visible)} total={@total} />
       <p class="mt-2 text-sm opacity-60">
-        Parties the app follows (the national list, plus any whose page you opened).
+        Every party standing in this council, from its party file.
       </p>
     </div>
     """

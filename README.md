@@ -49,6 +49,8 @@ minute or two.
 2. The 2021 final results: national, every province and municipality
 3. The 2026 results so far
 4. Map outlines for provinces, municipalities and wards, and the 2021 wards (about 80 MB)
+   and town and suburb names from OpenStreetMap, each placed in its ward (four Overpass
+   queries, once; see below)
 5. The 2026 municipality files: which municipality each ward is in, and every party
    standing (about 520), which the app then follows
 6. The 2021 municipality files: every party's result in every ward, and its winner
@@ -79,7 +81,8 @@ To start again from nothing: `mix ecto.reset`.
   against who won the same wards in 2021, every ward to pick from, the closest wards and
   those that changed hands, every followed party vs 2021, a ward map, each ward's winner
   now and in 2021, and the change history
-- `/wards` (the search link in the header): find a ward by municipality or city and ward
+- `/wards` (the search link in the header): find a ward by suburb or town ("Meadowridge"),
+  or by municipality or city and ward
   number ("Pretoria 45", "tswane 12", "EC153 18"), or by its IEC ward id. Misspellings
   and half-typed names still match; the big cities and towns are known by their own names
   (Durban, Gqeberha, Soweto). Enter opens the best match, the arrow keys move through the
@@ -146,6 +149,23 @@ Failures back off from 30 seconds to 5 minutes.
 
 The IEC rewrites its files every one to two minutes, and the figures in them are a few
 minutes old, so the app is about as live as the IEC's own dashboard.
+
+### Town and suburb names
+
+The IEC names wards by municipality and number only, so "Meadowridge" would find nothing.
+Town and suburb names come from OpenStreetMap (© OpenStreetMap contributors, ODbL,
+credited on `/about`): cities, towns, villages, hamlets, suburbs, neighbourhoods and
+quarters, read once through the Overpass API and stored in `places` (`Iec.Places`). Each
+is a point (an area at its centre), placed in the live ward whose outline holds it, so a
+suburb reaching into a neighbouring ward finds the ward with its centre. Searching never
+calls Overpass.
+
+`Iec.Places.Overpass` keeps to the
+[public instance's usage policy](https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances):
+four queries (South Africa in four tiles), one at a time, each only once `/api/status`
+reports a free slot (waiting as long as it says), backing off from 30 seconds to 10 minutes
+on a busy answer, and on giving up trying again two hours later rather than pressing it.
+Requests name the site in their User-Agent.
 
 ## How the history works
 

@@ -26,7 +26,7 @@ defmodule IecWeb.MapComponent do
   use IecWeb, :live_component
 
   import IecWeb.ResultsComponents,
-    only: [format_number: 1, party_abbreviation: 2, party_colour: 2]
+    only: [area_path: 1, format_number: 1, party_abbreviation: 2, party_colour: 2]
 
   alias Iec.Maps
 
@@ -202,7 +202,7 @@ defmodule IecWeb.MapComponent do
       id: "#{boundary.level}-#{boundary.area_id}",
       path: if(overview, do: boundary.overview_path || boundary.path, else: boundary.path),
       title: title,
-      href: area_href(boundary)
+      href: area_path(boundary)
     }
   end
 
@@ -250,11 +250,6 @@ defmodule IecWeb.MapComponent do
   end
 
   defp decimal(value), do: :erlang.float_to_binary(value / 1, decimals: 1)
-
-  defp area_href(%{level: :province, area_id: id}), do: ~p"/provinces/#{id}"
-  defp area_href(%{level: :municipality, area_id: id}), do: ~p"/municipalities/#{id}"
-
-  defp area_href(%{level: :ward, area_id: id}), do: ~p"/wards/#{id}"
 
   # Legend counts: areas led (or, for flips, won from someone else) per party, or for
   # the figure-based modes, areas per band.
@@ -380,7 +375,7 @@ defmodule IecWeb.MapComponent do
         <div class="absolute right-2 top-2 flex flex-col overflow-hidden rounded-box border border-base-300 bg-base-100/90 shadow-sm backdrop-blur">
           <button
             type="button"
-            class="btn btn-ghost btn-sm btn-square rounded-none"
+            class="btn btn-ghost btn-square size-10 rounded-none"
             aria-label="Zoom in"
             phx-click={JS.dispatch("map:zoom", to: "##{@id}-svg", detail: %{by: 1.6})}
           >
@@ -388,7 +383,7 @@ defmodule IecWeb.MapComponent do
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-sm btn-square rounded-none border-t border-base-300"
+            class="btn btn-ghost btn-square size-10 rounded-none border-t border-base-300"
             aria-label="Zoom out"
             phx-click={JS.dispatch("map:zoom", to: "##{@id}-svg", detail: %{by: 1 / 1.6})}
           >
@@ -396,7 +391,7 @@ defmodule IecWeb.MapComponent do
           </button>
           <button
             type="button"
-            class="btn btn-ghost btn-sm btn-square rounded-none border-t border-base-300"
+            class="btn btn-ghost btn-square size-10 rounded-none border-t border-base-300"
             aria-label="Show everything"
             phx-click={JS.dispatch("map:reset", to: "##{@id}-svg")}
           >
@@ -412,11 +407,15 @@ defmodule IecWeb.MapComponent do
         </p>
 
         <p class="pointer-events-none absolute bottom-2 left-3 text-xs opacity-50">
-          Scroll or pinch to zoom · drag to move · click to open
+          <span class="pointer-coarse:hidden">Scroll to zoom · drag to move · click to open</span>
+          <span class="hidden pointer-coarse:inline">
+            Pinch to zoom · drag to move · tap twice to open
+          </span>
         </p>
 
         <div
           id={"#{@id}-tooltip"}
+          phx-mounted={JS.ignore_attributes(["class", "style"])}
           class="pointer-events-none absolute z-10 hidden max-w-xs rounded-box border border-base-300 bg-base-100/95 px-3 py-1.5 text-sm shadow-lg backdrop-blur"
         />
       </div>
@@ -426,6 +425,9 @@ defmodule IecWeb.MapComponent do
       <script :type={Phoenix.LiveView.ColocatedHook} name=".ElectionMap">
         // Pan and zoom by transforming the viewport group (the server owns the viewBox),
         // a tooltip that follows the pointer, and click-through that ignores drags.
+        //
+        // Movement is measured in screen pixels: a press that travels less than a few
+        // pixels is a click or tap, more is a drag (or a pinch), which never opens an area.
         export default {
           mounted() {
             this.viewport = this.el.querySelector("g[id$='-viewport']")
@@ -434,7 +436,9 @@ defmodule IecWeb.MapComponent do
             this.pointers = new Map()
             this.reset()
 
+            // Zoomed all the way out, scrolling down scrolls the page, not the map.
             this.el.addEventListener("wheel", (event) => {
+              if (this.scale === 1 && event.deltaY > 0) return
               event.preventDefault()
               this.zoomAt(this.point(event), Math.exp(-event.deltaY * 0.0015))
             }, {passive: false})
@@ -445,30 +449,36 @@ defmodule IecWeb.MapComponent do
               this.pressed = event.target.closest && event.target.closest("[data-href]")
               this.pointerType = event.pointerType
               this.el.setPointerCapture(event.pointerId)
-              this.pointers.set(event.pointerId, this.point(event))
-              this.moved = 0
+              this.pointers.set(event.pointerId, {point: this.point(event), clientX: event.clientX, clientY: event.clientY})
+              this.travel = 0
+              this.dragging = this.pointers.size > 1
             })
 
             this.el.addEventListener("pointermove", (event) => {
-              if (this.pointers.has(event.pointerId)) {
-                const previous = this.pointers.get(event.pointerId)
-                const current = this.point(event)
+              const pressed = this.pointers.get(event.pointerId)
 
-                if (this.pointers.size === 2) {
-                  const [other] = [...this.pointers].filter(([id]) => id !== event.pointerId).map(([, p]) => p)
-                  const before = Math.hypot(previous.x - other.x, previous.y - other.y)
-                  const after = Math.hypot(current.x - other.x, current.y - other.y)
-                  if (before > 0) this.zoomAt({x: (current.x + other.x) / 2, y: (current.y + other.y) / 2}, after / before)
-                } else {
-                  this.panBy(current.x - previous.x, current.y - previous.y)
-                }
-
-                this.moved += Math.hypot(current.x - previous.x, current.y - previous.y)
-                this.pointers.set(event.pointerId, this.point(event))
-                this.hideTooltip()
+              if (!pressed) {
+                if (event.pointerType !== "touch") this.showTooltip(event.target, event)
                 return
               }
-              if (event.pointerType !== "touch") this.showTooltip(event.target, event)
+
+              this.travel += Math.hypot(event.clientX - pressed.clientX, event.clientY - pressed.clientY)
+              const current = this.point(event)
+              this.pointers.set(event.pointerId, {point: current, clientX: event.clientX, clientY: event.clientY})
+
+              // Below the threshold it is still a tap: a finger always moves a little.
+              if (!this.dragging && this.travel < this.dragThreshold()) return
+              this.dragging = true
+              this.hideTooltip()
+
+              if (this.pointers.size === 2) {
+                const [other] = [...this.pointers].filter(([id]) => id !== event.pointerId).map(([, entry]) => entry.point)
+                const before = Math.hypot(pressed.point.x - other.x, pressed.point.y - other.y)
+                const after = Math.hypot(current.x - other.x, current.y - other.y)
+                if (before > 0) this.zoomAt({x: (current.x + other.x) / 2, y: (current.y + other.y) / 2}, after / before)
+              } else {
+                this.panBy(current.x - pressed.point.x, current.y - pressed.point.y)
+              }
             })
 
             const release = (event) => this.pointers.delete(event.pointerId)
@@ -483,7 +493,7 @@ defmodule IecWeb.MapComponent do
             this.el.addEventListener("click", (event) => {
               const area = this.pressed
               this.pressed = null
-              if (this.moved >= this.dragThreshold()) return
+              if (this.dragging) return
               if (!area) { this.hideTooltip(); return }
 
               if (this.pointerType === "touch" && this.selected !== area) {
@@ -506,6 +516,7 @@ defmodule IecWeb.MapComponent do
           updated() {
             if (this.el.getAttribute("viewBox") !== this.viewBox) {
               this.viewBox = this.el.getAttribute("viewBox")
+              this.hideTooltip()
               this.reset()
             }
           },
@@ -518,8 +529,9 @@ defmodule IecWeb.MapComponent do
             return point.matrixTransform(this.el.getScreenCTM().inverse())
           },
 
+          // Screen pixels a press may travel and still count as a click or tap.
           dragThreshold() {
-            return this.el.viewBox.baseVal.width / 150
+            return this.pointerType === "touch" ? 10 : 5
           },
 
           reset() {
@@ -535,18 +547,21 @@ defmodule IecWeb.MapComponent do
             this.x = point.x - (point.x - this.x) * ratio
             this.y = point.y - (point.y - this.y) * ratio
             this.scale = scale
-            if (scale === 1) { this.x = 0; this.y = 0 }
             this.apply()
           },
 
-          panBy(dx, dy) {
-            if (this.scale === 1) return
-            this.x += dx
-            this.y += dy
+          panBy(deltaX, deltaY) {
+            this.x += deltaX
+            this.y += deltaY
             this.apply()
           },
 
+          // Keeps the map covering the frame, so it can never be dragged out of sight.
           apply() {
+            const box = this.el.viewBox.baseVal
+            const clamp = (value, low, high) => Math.min(Math.max(value, low), high)
+            this.x = clamp(this.x, (box.x + box.width) * (1 - this.scale), box.x * (1 - this.scale))
+            this.y = clamp(this.y, (box.y + box.height) * (1 - this.scale), box.y * (1 - this.scale))
             this.viewport.setAttribute("transform", `translate(${this.x} ${this.y}) scale(${this.scale})`)
           },
 

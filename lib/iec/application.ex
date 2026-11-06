@@ -5,6 +5,8 @@ defmodule Iec.Application do
 
   use Application
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
     children =
@@ -23,29 +25,31 @@ defmodule Iec.Application do
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Iec.Supervisor]
-    Supervisor.start_link(children, opts)
+    options = [strategy: :one_for_one, name: Iec.Supervisor]
+    Supervisor.start_link(children, options)
   end
 
   # One poller per feed file, started a couple of seconds apart so the first round of
   # requests does not hit the IEC all at once.
   # Alongside them a one-off task refreshes the party list, imports what is not stored
-  # yet (the previous election, map outlines, municipality files), and follows every
-  # party standing.
+  # yet (the previous election, map outlines, town and suburb names, municipality files),
+  # and follows every party standing.
   defp pollers do
     if Application.fetch_env!(:iec, Iec.Results)[:poll] do
       setup =
         Supervisor.child_spec(
           {Task,
            fn ->
-             Iec.Results.refresh_parties()
-             Iec.Results.import_previous_election()
-             Iec.Results.import_history()
-             Iec.Parties.follow_national_parties()
-             Iec.Maps.import_boundaries()
-             Iec.Parties.import_municipality_files()
-             Iec.Parties.import_previous_ward_results()
-             Iec.Parties.complete_municipality_files()
+             run_setup_step(&Iec.Results.refresh_parties/0)
+             run_setup_step(&Iec.Results.import_previous_election/0)
+             run_setup_step(&Iec.Results.import_history/0)
+             run_setup_step(&Iec.Parties.follow_national_parties/0)
+             run_setup_step(&Iec.Maps.import_boundaries/0)
+             # Its own task: Overpass may be busy for hours, which must not hold up the rest.
+             Task.Supervisor.start_child(Iec.TaskSupervisor, &Iec.Places.complete_import/0)
+             run_setup_step(&Iec.Parties.import_municipality_files/0)
+             run_setup_step(&Iec.Parties.import_previous_ward_results/0)
+             run_setup_step(&Iec.Parties.complete_municipality_files/0)
            end},
           id: :results_setup,
           restart: :temporary
@@ -62,6 +66,17 @@ defmodule Iec.Application do
     else
       []
     end
+  end
+
+  # One setup step; a failure is logged and the rest still run (it is retried on the next
+  # start, as every step skips what is already stored).
+  defp run_setup_step(step) do
+    step.()
+  catch
+    kind, reason ->
+      Logger.error(
+        "Setup step #{inspect(step)} failed: " <> Exception.format(kind, reason, __STACKTRACE__)
+      )
   end
 
   # Tell Phoenix to update the endpoint configuration

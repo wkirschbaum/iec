@@ -12,6 +12,7 @@ defmodule IecWeb.ChangesLive do
   on_mount {IecWeb.LiveUpdates, [:results]}
 
   @page_size 100
+  @max_limit 2_000
   @levels %{"national" => :national, "province" => :province, "municipality" => :municipality}
 
   @impl Phoenix.LiveView
@@ -56,8 +57,9 @@ defmodule IecWeb.ChangesLive do
   end
 
   @impl Phoenix.LiveView
+  # Capped: the limit is part of the shared cache key, so it must not grow without end.
   def handle_event("load_more", _params, socket) do
-    {:noreply, socket |> update(:limit, &(&1 + @page_size)) |> refresh()}
+    {:noreply, socket |> update(:limit, &min(&1 + @page_size, @max_limit)) |> refresh()}
   end
 
   def handle_event("toggle_round", %{"round" => round}, socket) do
@@ -69,8 +71,14 @@ defmodule IecWeb.ChangesLive do
      end)}
   end
 
+  # Anything else (a stale or crafted event) changes nothing.
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
+
   defp areas(1), do: "1 area"
   defp areas(count), do: "#{count} areas"
+
+  defp the_areas(1), do: "the area"
+  defp the_areas(count), do: "the #{count} areas"
 
   defp changes_path(assigns, changes) do
     params =
@@ -166,7 +174,7 @@ defmodule IecWeb.ChangesLive do
                   MapSet.member?(@open_rounds, round.id) && "rotate-90"
                 ]}
               />
-              {if MapSet.member?(@open_rounds, round.id), do: "Hide", else: "Show"} the {areas(
+              {if MapSet.member?(@open_rounds, round.id), do: "Hide", else: "Show"} {the_areas(
                 round.areas
               )}
             </button>
@@ -186,7 +194,7 @@ defmodule IecWeb.ChangesLive do
         </ul>
       </div>
 
-      <button :if={@more} type="button" class="btn btn-ghost btn-sm" phx-click="load_more">
+      <button :if={@more} type="button" class="btn btn-ghost min-h-10" phx-click="load_more">
         Load more
       </button>
     </Layouts.app>

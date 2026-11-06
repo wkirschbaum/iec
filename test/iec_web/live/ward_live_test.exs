@@ -223,7 +223,7 @@ defmodule IecWeb.WardLiveTest do
 
     test "says so for a municipality that does not exist", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/municipalities/not-one")
-      assert html =~ "No results for this municipality yet."
+      assert html =~ "No results for this municipality yet, or no municipality has this id."
     end
   end
 
@@ -250,7 +250,7 @@ defmodule IecWeb.WardLiveTest do
 
     test "says what to try when nothing matches", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/wards?q=Soweto")
-      assert has_element?(view, "#ward-search-empty", "a suburb or street will not find one")
+      assert has_element?(view, "#ward-search-empty", "Try your suburb or town")
     end
   end
 end

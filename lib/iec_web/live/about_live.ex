@@ -73,11 +73,54 @@ defmodule IecWeb.AboutLive do
                 <strong>Map outlines</strong>: the IEC's election map, based on Municipal
                 Demarcation Board boundaries; simplified for display.
               </li>
+              <li>
+                <strong>Town and suburb names</strong>, for finding a ward:
+                <a href="https://www.openstreetmap.org/copyright" class="link" rel="noopener">
+                  OpenStreetMap
+                </a>
+                (cities, towns, villages, suburbs and neighbourhoods), read once through the
+                Overpass API. Each name is a single point, placed in the ward whose outline holds
+                it; a suburb can reach into neighbouring wards, so treat it as a pointer, not a
+                boundary. Street addresses are not looked up.
+              </li>
             </ul>
             <p>
               Results data © Electoral Commission of South Africa. Boundaries © Municipal
               Demarcation Board and the IEC.
+              Town and suburb names © <a
+                href="https://www.openstreetmap.org/copyright"
+                class="link"
+                rel="noopener"
+              >
+                OpenStreetMap contributors
+              </a>, available under the Open Database Licence.
             </p>
+          </.about_section>
+
+          <.about_section title="Asking politely">
+            <p>
+              Everything is fetched by the server in the background, never while you browse,
+              and every request names this site so its owners can see who is asking.
+            </p>
+            <ul class="list-disc space-y-2 pl-5">
+              <li>
+                <strong>The IEC</strong>: each file is asked for again only when the IEC's own
+                cache says it may have changed, with conditional requests, so an unchanged file
+                costs almost nothing. Polling backs off when a file fails.
+              </li>
+              <li>
+                <strong>OpenStreetMap</strong>: four queries to the Overpass API, once, one at a
+                time, each only when Overpass reports a free slot for us, waiting longer and
+                longer when it is busy, and trying again hours later rather than pressing it;
+                well inside its <a
+                  href="https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances"
+                  class="link"
+                  rel="noopener"
+                >
+                  usage policy
+                </a>. Searching never calls it.
+              </li>
+            </ul>
           </.about_section>
 
           <.about_section title="How it works">

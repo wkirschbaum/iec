@@ -64,9 +64,12 @@ defmodule Iec.Wards do
   @doc """
   A directory (`list_directory/0`) made ready to search: `%{wards, municipalities}`, each
   municipality with its wards and its name prepared for matching. Build it once per
-  data change and search it on every keystroke.
+  data change and search it on every keystroke. `build_index/0` builds it from the live
+  directory and the stored places (`Iec.Places`).
   """
-  def build_index(directory) do
+  def build_index, do: build_index(list_directory(), Iec.Places.list_placed())
+
+  def build_index(directory, places \\ []) do
     municipalities =
       directory
       |> Enum.reject(&is_nil(&1.municipality_name))
@@ -81,17 +84,32 @@ defmodule Iec.Wards do
         }
       end)
 
-    %{wards: directory, municipalities: municipalities}
+    wards_by_id = Map.new(directory, &{&1.ward_id, &1})
+
+    # Places in the same ward under the same name are one answer.
+    places =
+      for place <- Enum.uniq_by(places, &{&1.name, &1.ward_id}),
+          ward = wards_by_id[place.ward_id] do
+        Map.merge(ward, %{
+          place_name: place.name,
+          population: place.population,
+          prepared: NameMatch.prepare_place(place.name, place.alternate_names)
+        })
+      end
+
+    %{wards: directory, municipalities: municipalities, places: places}
   end
 
   @doc """
-  Searches an index (`build_index/1`), forgiving typos in municipality names
-  (`Iec.Wards.NameMatch`): `%{municipalities, wards, more, ward_number}`.
+  Searches an index (`build_index/2`), forgiving typos in names (`Iec.Wards.NameMatch`):
+  `%{municipalities, places, wards, more, ward_number}`.
 
     * a ward id (seven digits or more) finds that ward
     * words find municipalities, best match first (at most `:municipalities`, default 8),
       each with its wards, its `score`, the `segments` of its name to highlight, and the
       `place` it was found by ("Pretoria"), if any
+    * words also find towns and suburbs (`places`, at most 6), each with the ward it lies
+      in, best match first, then the biggest
     * a ward number finds that ward in the municipalities found, best first, or in every
       municipality without words; `ward_number` is the number typed
 
@@ -105,7 +123,7 @@ defmodule Iec.Wards do
     case numbers do
       [number | _rest] when number >= 1_000_000 ->
         wards = Enum.filter(directory, &(&1.ward_id == number))
-        %{municipalities: [], wards: wards, more: 0, ward_number: nil}
+        %{municipalities: [], places: [], wards: wards, more: 0, ward_number: nil}
 
       _ward_numbers ->
         municipalities =
@@ -128,11 +146,26 @@ defmodule Iec.Wards do
 
         %{
           municipalities: Enum.take(municipalities, municipality_limit),
+          places: if(words == [], do: [], else: match_places(index[:places] || [], words)),
           wards: Enum.take(wards, limit),
           more: max(length(wards) - limit, 0),
           ward_number: List.first(numbers)
         }
     end
+  end
+
+  defp match_places(places, words) do
+    places
+    |> Enum.filter(&NameMatch.possible?(&1.prepared, words))
+    |> Enum.flat_map(fn place ->
+      case NameMatch.match(place.prepared, words) do
+        nil -> []
+        match -> [place |> Map.delete(:prepared) |> Map.merge(match)]
+      end
+    end)
+    |> Enum.sort_by(&{-&1.score, -(&1.population || 0), &1.place_name})
+    |> close_to_best()
+    |> Enum.take(6)
   end
 
   defp match_municipalities(municipalities, words) do

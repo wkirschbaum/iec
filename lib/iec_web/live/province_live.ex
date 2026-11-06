@@ -16,7 +16,7 @@ defmodule IecWeb.ProvinceLive do
     {:ok,
      socket
      |> assign(
-       province_id: String.to_integer(id),
+       province_id: IecWeb.Params.id(id),
        live_year: Results.live_year(),
        previous_year: Results.previous_year()
      )
@@ -30,6 +30,8 @@ defmodule IecWeb.ProvinceLive do
 
   # Computed once per data change and shared by everyone viewing the same page.
   defp cache_key(assigns), do: {__MODULE__, assigns.province_id}
+
+  defp load(%{province_id: nil}), do: %{page_title: "Province", province: nil}
 
   defp load(assigns) do
     %{
@@ -77,9 +79,10 @@ defmodule IecWeb.ProvinceLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
-      <div :if={is_nil(@province)} class="panel p-6 text-base-content/70">
-        No results for this province yet.
-      </div>
+      <.page_header :if={is_nil(@province)} eyebrow="Province" title="No results">
+        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
+        <:lede>No results for this province yet, or no province has this id.</:lede>
+      </.page_header>
 
       <.page_header
         :if={@province}
@@ -108,9 +111,7 @@ defmodule IecWeb.ProvinceLive do
             )}
           </.kpi>
           <.kpi label="Votes counted" value={format_compact(@province.total_votes_cast)}>
-            {@previous_year}: {format_compact(
-              @previous_province && @previous_province.total_votes_cast
-            )}
+            {format_compact(@previous_province && @previous_province.total_votes_cast)} in all of {@previous_year}
           </.kpi>
           <.kpi
             label="Councils decided"

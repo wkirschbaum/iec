@@ -102,18 +102,29 @@ defmodule Iec.PartiesTest do
       municipality_snapshot(3003, "JHB - City of Johannesburg", true)
       municipality_snapshot(3004, "TSH - City of Tshwane", false)
 
-      Repo.insert_all(Ward, [
-        %{id: 79_800_001, municipality_id: 3003, ward_number: 1, inserted_at: DateTime.utc_now()}
-      ])
+      # Wards 1 to 3 are in the live directory; ward 4 was abolished.
+      Repo.insert_all(
+        Ward,
+        for ward_id <- 79_800_001..79_800_003 do
+          %{
+            id: ward_id,
+            municipality_id: 3003,
+            ward_number: Ward.ward_number(ward_id),
+            inserted_at: DateTime.utc_now()
+          }
+        end
+      )
 
-      # 2021: party 7 held Johannesburg and Tshwane and wards 1 and 2; party 52 held ward 3.
+      # 2021: party 7 held Johannesburg and Tshwane and wards 1, 2 and 4; party 52 held
+      # ward 3.
       ingest(
         2021,
         7,
         party_file([{3003, 51.0, true}, {3004, 52.0, true}], [
           {79_800_001, 60.0, true},
           {79_800_002, 58.0, true},
-          {79_800_003, 30.0, false}
+          {79_800_003, 30.0, false},
+          {79_800_004, 70.0, true}
         ])
       )
 
@@ -158,6 +169,25 @@ defmodule Iec.PartiesTest do
       assert %{status: :pending, holder: nil} = by_id[79_800_002]
       assert %{status: :gained, previous_holder: 52, new_ward: false} = by_id[79_800_003]
       assert by_id[79_800_001].declared_at
+    end
+
+    test "an abolished ward is neither pending nor lost" do
+      by_id = Map.new(Parties.get_party_overview(7).wards, &{&1.ward_id, &1})
+
+      assert %{status: :none, abolished: true, new_ward: false} = by_id[79_800_004]
+      refute by_id[79_800_002].abolished
+    end
+  end
+
+  describe "get_movers/0" do
+    test "leaves out a council share with no previous figure" do
+      municipality_snapshot(3003, "JHB - City of Johannesburg", true)
+      municipality_snapshot(3004, "TSH - City of Tshwane", true)
+      ingest(2021, 7, party_file([{3003, nil, false}, {3004, 30.0, false}], []))
+      ingest(2026, 7, party_file([{3003, 40.0, false}, {3004, 35.0, false}], []))
+
+      assert %{local_swings: %{rises: [rise], falls: [_fall]}} = Parties.get_movers()
+      assert %{municipality_id: 3004, swing: 5.0} = rise
     end
   end
 end

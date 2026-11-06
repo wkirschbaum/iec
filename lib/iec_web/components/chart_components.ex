@@ -74,7 +74,7 @@ defmodule IecWeb.ChartComponents do
           preserveAspectRatio="none"
           class="absolute inset-0 h-full w-full overflow-visible"
           role="img"
-          aria-label="Trend chart"
+          aria-label={chart_label(@trend, @unit)}
         >
           <g :for={line <- @lines}>
             <path
@@ -136,6 +136,20 @@ defmodule IecWeb.ChartComponents do
       </ul>
     </div>
     """
+  end
+
+  # What a screen reader says for the chart: each line from its first point to its last.
+  defp chart_label(%{series: []}, _unit), do: "Trend chart, no data yet"
+
+  defp chart_label(%{series: series}, unit) do
+    series
+    |> Enum.map_join("; ", fn line ->
+      {first_year, first} = hd(line.points)
+      {last_year, last} = List.last(line.points)
+
+      "#{line.label} #{value_label(first, unit)} in #{first_year}, " <>
+        "#{value_label(last, unit)} in #{last_year}"
+    end)
   end
 
   defp line_path([], _x, _y), do: nil

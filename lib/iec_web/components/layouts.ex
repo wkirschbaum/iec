@@ -89,7 +89,7 @@ defmodule IecWeb.Layouts do
             aria-label="Find your ward"
             title="Find your ward"
             class={[
-              "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm transition-colors",
+              "inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm transition-colors",
               @active == :wards && "bg-base-content font-medium text-base-100",
               @active != :wards && "text-base-content/60 hover:bg-base-200 hover:text-base-content"
             ]}
@@ -101,7 +101,7 @@ defmodule IecWeb.Layouts do
           <.link
             navigate={~p"/about"}
             class={[
-              "rounded-full px-3 py-1.5 text-sm transition-colors",
+              "inline-flex min-h-10 items-center rounded-full px-3 text-sm transition-colors",
               @active == :about && "bg-base-content font-medium text-base-100",
               @active != :about && "text-base-content/60 hover:bg-base-200 hover:text-base-content"
             ]}
@@ -186,7 +186,7 @@ defmodule IecWeb.Layouts do
       <div class={[container(), "flex items-center gap-6 py-2 md:py-2.5"]}>
         <div class="flex items-baseline gap-2">
           <span class="font-serif text-2xl font-semibold tabular-nums tracking-tight text-primary md:text-3xl">
-            {:erlang.float_to_binary(@percentage, decimals: 1)}%
+            {IecWeb.ResultsComponents.format_progress(@percentage)}
           </span>
           <span class="eyebrow">counted</span>
         </div>
@@ -306,7 +306,7 @@ defmodule IecWeb.Layouts do
         cond do
           @status.feeds == 0 -> "bg-base-300"
           @status.failing > 0 -> "bg-error"
-          true -> "bg-success animate-pulse"
+          true -> "bg-success motion-safe:animate-pulse"
         end
       ]} />
       <span :if={@status.feeds == 0} class="opacity-60">Polling off</span>
@@ -416,6 +416,7 @@ defmodule IecWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        aria-label="Theme: follow the system"
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -424,6 +425,7 @@ defmodule IecWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        aria-label="Theme: light"
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
@@ -432,6 +434,7 @@ defmodule IecWeb.Layouts do
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        aria-label="Theme: dark"
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>

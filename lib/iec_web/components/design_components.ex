@@ -26,7 +26,7 @@ defmodule IecWeb.DesignComponents do
         </div>
         <p :if={@eyebrow} class="eyebrow flex items-center gap-2">
           <span :if={@live} class="relative flex size-2">
-            <span class="absolute inline-flex size-full animate-ping rounded-full bg-primary/50" />
+            <span class="absolute inline-flex size-full motion-safe:animate-ping rounded-full bg-primary/50" />
             <span class="relative inline-flex size-2 rounded-full bg-primary" />
           </span>
           {@eyebrow}
@@ -79,7 +79,7 @@ defmodule IecWeb.DesignComponents do
         :for={option <- @option}
         patch={option.patch}
         class={[
-          "whitespace-nowrap rounded-full px-3.5 py-1.5 transition-all active:scale-95",
+          "inline-flex min-h-10 items-center whitespace-nowrap rounded-full px-3.5 transition-all active:scale-95",
           option[:active] && "bg-base-100 font-medium text-base-content shadow-sm",
           !option[:active] && "text-base-content/65 hover:text-base-content"
         ]}
@@ -115,6 +115,9 @@ defmodule IecWeb.DesignComponents do
 
   @doc "A swing as a small coloured chip: ▲ 2.8 or ▼ 13.7, or \"new\" without a value."
   def swing_chip(assigns) do
+    # Rounded first, so the arrow agrees with the figure: +0.04 is level, not "▲ 0.0".
+    assigns = update(assigns, :value, &if(is_number(&1), do: Float.round(&1 / 1, 1)))
+
     ~H"""
     <span
       :if={is_number(@value)}
@@ -178,7 +181,10 @@ defmodule IecWeb.DesignComponents do
         >
           <span
             :if={row.share >= 10}
-            class="absolute inset-y-0 left-2 right-1 flex items-center truncate text-xs font-semibold text-black/75 mix-blend-multiply"
+            class={[
+              "absolute inset-y-0 left-2 right-1 flex items-center truncate text-xs font-semibold",
+              label_colour(party_colour(@parties, row))
+            ]}
           >
             {party_abbreviation(@parties, row)}
           </span>
@@ -218,6 +224,28 @@ defmodule IecWeb.DesignComponents do
     </div>
     """
   end
+
+  # Dark text on a light party colour, light text on a dark one.
+  defp label_colour("#" <> hex) when byte_size(hex) in [3, 6] do
+    hex =
+      if byte_size(hex) == 3,
+        do: hex |> String.graphemes() |> Enum.map_join(&(&1 <> &1)),
+        else: hex
+
+    case Integer.parse(hex, 16) do
+      {value, ""} ->
+        <<red, green, blue>> = <<value::24>>
+
+        if 0.299 * red + 0.587 * green + 0.114 * blue > 150,
+          do: "text-black/75",
+          else: "text-white/90"
+
+      _not_hex ->
+        "text-black/75"
+    end
+  end
+
+  defp label_colour(_colour), do: "text-black/75"
 
   attr :segments, :list, required: true, doc: "`{party_id, share}`, biggest first"
   attr :parties, :map, required: true

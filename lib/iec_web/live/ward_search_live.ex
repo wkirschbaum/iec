@@ -45,6 +45,9 @@ defmodule IecWeb.WardSearchLive do
     end
   end
 
+  # Anything else (a stale or crafted event) changes nothing.
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
+
   defp search_path(""), do: ~p"/wards"
   defp search_path(query), do: ~p"/wards?#{[q: query]}"
 
@@ -54,7 +57,7 @@ defmodule IecWeb.WardSearchLive do
 
     # Built once per data change and shared by every searcher, so a keystroke costs a
     # search in memory and nothing in the database.
-    index = Iec.Cache.fetch(:ward_index, fn -> Wards.build_index(Wards.list_directory()) end)
+    index = Iec.Cache.fetch(:ward_index, &Wards.build_index/0)
 
     ward_results =
       Iec.Cache.fetch(:ward_results, fn ->
@@ -63,19 +66,29 @@ defmodule IecWeb.WardSearchLive do
 
     found = Wards.search(query, index)
     ward_rows = TableRows.ward_result_rows(found.wards, ward_results, parties)
+    place_rows = TableRows.ward_result_rows(found.places, ward_results, parties)
     {best, others} = split_best(found.municipalities)
+
+    # A place that matches better than any municipality ("Meadowridge") is the answer.
+    places_first =
+      ward_rows == [] and place_rows != [] and
+        (is_nil(best) or hd(place_rows).score > best.score)
 
     assign(socket,
       ward_total: length(index.wards),
+      place_total: length(index.places),
       metros: metros(index),
       ward_rows: ward_rows,
+      place_rows: place_rows,
+      places_first: places_first,
       more_wards: found.more,
       ward_number: found.ward_number,
-      ward_results: ward_results,
+      # Only the wards on show, not every ward's result in every searcher's page.
+      ward_results: Map.take(ward_results, Enum.map((best && best.wards) || [], & &1.ward_id)),
       best: best && with_council(best),
       others: Enum.map(others, &with_council/1),
-      top: top(ward_rows, best),
-      nothing: query != "" and ward_rows == [] and is_nil(best)
+      top: top(ward_rows, place_rows, best, places_first),
+      nothing: query != "" and ward_rows == [] and place_rows == [] and is_nil(best)
     )
   end
 
@@ -109,17 +122,24 @@ defmodule IecWeb.WardSearchLive do
     end)
   end
 
-  # What Enter opens: the first ward found, else the best municipality.
-  defp top([ward | _rest], _best),
-    do: %{
-      path: ~p"/wards/#{ward.ward_id}",
-      label: "Ward #{ward.ward_number} · #{ward.municipality_name}"
-    }
+  # What Enter opens: the first ward found by number, else the best place or municipality.
+  defp top([ward | _rest], _places, _best, _places_first), do: ward_target(ward)
+  defp top([], [place | _rest], _best, true), do: ward_target(place)
 
-  defp top([], %{} = best),
+  defp top([], _places, %{} = best, _places_first),
     do: %{path: ~p"/municipalities/#{best.municipality_id}", label: best.municipality_name}
 
-  defp top([], nil), do: nil
+  defp top([], [place | _rest], nil, _places_first), do: ward_target(place)
+  defp top([], [], nil, _places_first), do: nil
+
+  defp ward_target(ward) do
+    place = if ward[:place_name], do: "#{ward.place_name}: ", else: ""
+
+    %{
+      path: ~p"/wards/#{ward.ward_id}",
+      label: "#{place}Ward #{ward.ward_number} · #{ward.municipality_name}"
+    }
+  end
 
   # The metros: their codes are three letters ("TSH - City of Tshwane").
   defp metros(index) do
@@ -143,7 +163,8 @@ defmodule IecWeb.WardSearchLive do
     >
       <.page_header eyebrow="Wards" title="Find your ward">
         <:lede>
-          Type your municipality or city and your ward number. Spelling needn't be exact.
+          Type your suburb or town, or your municipality and ward number. Spelling needn't
+          be exact.
         </:lede>
       </.page_header>
 
@@ -176,12 +197,16 @@ defmodule IecWeb.WardSearchLive do
           </label>
           <p id="ward-search-hint" class="min-h-5 px-5 text-sm text-base-content/60">
             <span :if={@top}>
-              <kbd class="kbd kbd-xs">Enter</kbd>
-              opens <span class="font-medium text-base-content">{@top.label}</span>
+              <span class="hidden sm:inline"><kbd class="kbd kbd-xs">Enter</kbd> opens</span>
+              <span class="sm:hidden">Top match:</span>
+              <span class="font-medium text-base-content">{@top.label}</span>
               <span class="hidden sm:inline">· <kbd class="kbd kbd-xs">↓</kbd> to pick another</span>
             </span>
             <span :if={is_nil(@top) and @query == ""}>
-              Or the IEC's eight-digit ward ID. Every one of the {format_number(@ward_total)} wards has a page.
+              Or the IEC's eight-digit ward ID. Every one of the {format_number(@ward_total)} wards has a page{if @place_total >
+                                                                                                                    0,
+                                                                                                                  do:
+                                                                                                                    ", findable from #{format_number(@place_total)} towns and suburbs"}.
             </span>
           </p>
         </form>
@@ -220,9 +245,9 @@ defmodule IecWeb.WardSearchLive do
         </section>
 
         <p :if={@nothing} id="ward-search-empty" class="panel max-w-2xl p-6 text-base-content/70">
-          Nothing matches “{@query}”. Search by municipality or city and ward number. The IEC
-          names wards by number only, so a suburb or street will not find one; the IEC
-          (elections.org.za) can tell you your ward from your address or ID number.
+          Nothing matches “{@query}”. Try your suburb or town, or your municipality and ward
+          number. Street names are not known here; the IEC (elections.org.za) can tell you
+          your ward from your address or ID number.
         </p>
 
         <%!-- Wards found by number or id, the first as the answer. --%>
@@ -230,12 +255,23 @@ defmodule IecWeb.WardSearchLive do
           <.ward_card row={hd(@ward_rows)} parties={@parties} />
           <ul :if={length(@ward_rows) > 1} class="panel divide-y divide-base-300 overflow-hidden">
             <li :for={row <- tl(@ward_rows)}>
-              <.ward_row row={row} parties={@parties} />
+              <.ward_row id={"ward-results-#{row.ward_id}"} row={row} parties={@parties} />
             </li>
           </ul>
           <p :if={@more_wards > 0} class="text-sm text-base-content/60">
             {@more_wards} more wards have that number: add a municipality or city to narrow it down.
           </p>
+        </section>
+
+        <%!-- A town or suburb that matches better than any municipality, as the answer. --%>
+        <section :if={@places_first} id="place-results" class="space-y-3">
+          <.ward_card row={hd(@place_rows)} parties={@parties} />
+          <ul :if={length(@place_rows) > 1} class="panel divide-y divide-base-300 overflow-hidden">
+            <li :for={{row, index} <- Enum.with_index(tl(@place_rows), 1)}>
+              <.ward_row id={"place-results-#{index}"} row={row} parties={@parties} />
+            </li>
+          </ul>
+          <.place_note />
         </section>
 
         <%!-- The best municipality, with every ward to pick from. --%>
@@ -247,7 +283,7 @@ defmodule IecWeb.WardSearchLive do
           <div class="flex flex-wrap items-end justify-between gap-3 border-b border-base-300 pb-3">
             <div class="min-w-0 space-y-1">
               <p :if={@best.place} class="text-sm text-base-content/60">
-                {String.capitalize(@best.place)} is in
+                {title_case(@best.place)} is in
               </p>
               <h2 class="text-xl font-medium sm:text-2xl">
                 <.link
@@ -276,7 +312,7 @@ defmodule IecWeb.WardSearchLive do
               />
               <.link
                 navigate={~p"/municipalities/#{@best.municipality_id}"}
-                class="btn btn-sm rounded-full"
+                class="btn min-h-10 rounded-full"
               >
                 Dashboard <.icon name="hero-arrow-right-micro" class="size-4" />
               </.link>
@@ -307,6 +343,20 @@ defmodule IecWeb.WardSearchLive do
           </ul>
         </section>
 
+        <section
+          :if={not @places_first and @place_rows != []}
+          id="place-results"
+          class="space-y-3"
+        >
+          <h2 class="eyebrow">Towns and suburbs</h2>
+          <ul class="panel divide-y divide-base-300 overflow-hidden">
+            <li :for={{row, index} <- Enum.with_index(@place_rows)}>
+              <.ward_row id={"place-results-#{index}"} row={row} parties={@parties} />
+            </li>
+          </ul>
+          <.place_note />
+        </section>
+
         <section :if={@others != []} id="ward-search-others" class="space-y-3">
           <h2 class="eyebrow">Also matching</h2>
           <ul class="panel divide-y divide-base-300 overflow-hidden">
@@ -321,7 +371,7 @@ defmodule IecWeb.WardSearchLive do
                     <.highlighted segments={municipality.segments} />
                   </span>
                   <span class="block text-xs text-base-content/55">
-                    {if municipality.place, do: "#{String.capitalize(municipality.place)} · "}{municipality.province_name} · {length(
+                    {if municipality.place, do: "#{title_case(municipality.place)} · "}{municipality.province_name} · {length(
                       municipality.wards
                     )} wards
                   </span>
@@ -380,6 +430,19 @@ defmodule IecWeb.WardSearchLive do
     """
   end
 
+  # "port elizabeth" → "Port Elizabeth".
+  defp title_case(place), do: place |> String.split() |> Enum.map_join(" ", &String.capitalize/1)
+
+  # Places are points: a suburb can reach past the ward its point is in.
+  defp place_note(assigns) do
+    ~H"""
+    <p class="text-sm text-base-content/60">
+      A suburb can reach into neighbouring wards: each ward's page shows the wards around
+      it. Town and suburb names: © OpenStreetMap contributors.
+    </p>
+    """
+  end
+
   # "TSH - City of Tshwane" → "TSH", which matches that municipality alone.
   defp municipality_code(name), do: name |> String.split(" - ") |> List.first()
 
@@ -401,7 +464,9 @@ defmodule IecWeb.WardSearchLive do
       />
       <span class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-6 gap-y-3 py-4 pr-4">
         <span class="min-w-0">
-          <span class="eyebrow block">{@row.municipality_name}</span>
+          <span class="eyebrow block">
+            {if @row[:place_name], do: "#{@row.place_name} · "}{@row.municipality_name}
+          </span>
           <span class="block font-serif text-3xl leading-tight">Ward {@row.ward_number}</span>
         </span>
         <span class="flex items-center gap-6">
@@ -433,20 +498,29 @@ defmodule IecWeb.WardSearchLive do
     """
   end
 
-  attr :row, :map, required: true
+  attr :id, :string, required: true
+  attr :row, :map, required: true, doc: "a ward, or a town or suburb with its ward"
   attr :parties, :map, required: true
 
   defp ward_row(assigns) do
     ~H"""
     <.link
       navigate={~p"/wards/#{@row.ward_id}"}
-      id={"ward-results-#{@row.ward_id}"}
+      id={@id}
       data-result
       class="group flex min-h-14 items-center gap-3 px-4 py-2.5 transition-colors hover:bg-base-200/70 focus-visible:bg-base-200 focus-visible:outline-none"
     >
       <span class="min-w-0 flex-1">
-        <span class="block font-medium">Ward {@row.ward_number}</span>
-        <span class="block truncate text-xs text-base-content/55">{@row.municipality_name}</span>
+        <span :if={@row[:place_name]} class="block truncate font-medium">
+          <.highlighted segments={@row.segments} />
+          <span :if={@row.place} class="text-xs font-normal text-base-content/55">
+            ({@row.place})
+          </span>
+        </span>
+        <span :if={is_nil(@row[:place_name])} class="block font-medium">Ward {@row.ward_number}</span>
+        <span class="block truncate text-xs text-base-content/55">
+          {if @row[:place_name], do: "Ward #{@row.ward_number} · "}{@row.municipality_name}
+        </span>
       </span>
       <.party_or_dash parties={@parties} party_id={@row.leader_id} link={false} empty="no results" />
       <span class="w-16 text-right text-sm tabular-nums">{format_percentage(@row.share)}</span>

@@ -5,7 +5,7 @@ defmodule IecWeb.Narrative do
   """
 
   import IecWeb.ResultsComponents,
-    only: [format_number: 1, party_abbreviation: 2, percentage_of: 2]
+    only: [format_number: 1, format_progress: 2, party_abbreviation: 2, percentage_of: 2]
 
   @doc """
   `%{headline, lede, eyebrow, live}` for an area: its snapshot and party rows (`IecWeb.TableRows`).
@@ -68,6 +68,12 @@ defmodule IecWeb.Narrative do
     |> Enum.join(" ")
   end
 
+  # Level to a tenth of a point reads as a tie, not "0.0 points behind".
+  defp runner_up(leader, [second | _], parties, final)
+       when abs(leader.share - second.share) < 0.05,
+       do:
+         "#{party_abbreviation(parties, second)} #{if final, do: "finishes", else: "is"} level with it on #{percent(second.share)}."
+
   defp runner_up(leader, [second | _], parties, final),
     do:
       "#{party_abbreviation(parties, second)} #{if final, do: "finishes", else: "is"} second with #{percent(second.share)}, #{points(leader.share - second.share)} behind."
@@ -79,8 +85,13 @@ defmodule IecWeb.Narrative do
     climber =
       others |> Enum.filter(&is_number(&1.swing)) |> Enum.max_by(& &1.swing, fn -> nil end)
 
+    # Without any previous figures (an area new since then) nobody is a newcomer.
     newcomer =
-      others |> Enum.filter(&is_nil(&1.previous_share)) |> Enum.max_by(& &1.share, fn -> nil end)
+      if Enum.any?(others, &is_number(&1.previous_share)),
+        do:
+          others
+          |> Enum.filter(&is_nil(&1.previous_share))
+          |> Enum.max_by(& &1.share, fn -> nil end)
 
     cond do
       newcomer != nil and newcomer.share >= 1 and
@@ -100,7 +111,20 @@ defmodule IecWeb.Narrative do
        )
        when is_integer(expected) and expected > 1 and is_integer(complete) and complete > 0 do
     hung = snapshot.hung_councils || 0
-    "#{hung} of #{complete} decided councils are hung."
+
+    case {hung, complete} do
+      {1, 1} ->
+        "The one decided council is hung."
+
+      {0, 1} ->
+        "The one decided council is not hung."
+
+      {1, complete} ->
+        "1 of #{complete} decided councils is hung."
+
+      {hung, complete} ->
+        "#{hung} of #{complete} decided councils are hung."
+    end
   end
 
   defp councils(_snapshot), do: nil
@@ -110,7 +134,8 @@ defmodule IecWeb.Narrative do
       percentage_of(snapshot.voting_districts_complete, snapshot.voting_districts_expected)
 
     if percentage < 100,
-      do: "#{:erlang.float_to_binary(percentage, decimals: 1)}% of voting districts counted.",
+      do:
+        "#{format_progress(snapshot.voting_districts_complete, snapshot.voting_districts_expected)} of voting districts counted.",
       else: "Every voting district is counted."
   end
 
@@ -123,7 +148,7 @@ defmodule IecWeb.Narrative do
   def party(stats, name, previous_year) do
     swing =
       case stats.swing do
-        nil -> "standing for the first time since #{previous_year}"
+        nil -> "not on the #{previous_year} ballot"
         swing when swing >= 0.05 -> "up #{points(swing)} on #{previous_year}"
         swing when swing <= -0.05 -> "down #{points(swing)} on #{previous_year}"
         _flat -> "level with #{previous_year}"
@@ -147,7 +172,9 @@ defmodule IecWeb.Narrative do
     verb = if lead.declared, do: "wins", else: "leads"
 
     %{
-      headline: "#{leader} #{verb} ward #{ward.ward_number} with #{percent(lead.leader_share)}",
+      headline:
+        "#{leader} #{verb} ward #{ward.ward_number}" <>
+          if(is_number(lead.leader_share), do: " with #{percent(lead.leader_share)}", else: ""),
       lede:
         [
           ward_runner_up(lead, parties),
@@ -168,6 +195,11 @@ defmodule IecWeb.Narrative do
       "#{party_abbreviation(parties, %{party_id: lead.leader_id})} won the ward ballot, " <>
         "though #{party_abbreviation(parties, %{party_id: lead.runner_up_id})} has the " <>
         "bigger share of all the ward's votes, #{percent(lead.runner_up_share)}."
+
+  defp ward_runner_up(%{margin: margin} = lead, parties) when margin < 0.05,
+    do:
+      "#{party_abbreviation(parties, %{party_id: lead.runner_up_id})} is level with it on " <>
+        "#{percent(lead.runner_up_share)}."
 
   defp ward_runner_up(lead, parties),
     do:
@@ -233,11 +265,7 @@ defmodule IecWeb.Narrative do
         snapshot.voting_districts_complete >= snapshot.voting_districts_expected
 
   defp counted_share(snapshot),
-    do:
-      :erlang.float_to_binary(
-        percentage_of(snapshot.voting_districts_complete, snapshot.voting_districts_expected),
-        decimals: 1
-      ) <> "%"
+    do: format_progress(snapshot.voting_districts_complete, snapshot.voting_districts_expected)
 
   defp count(number, singular, plural \\ nil)
   defp count(1, singular, _plural), do: "1 #{singular}"

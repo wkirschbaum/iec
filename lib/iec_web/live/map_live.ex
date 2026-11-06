@@ -28,11 +28,10 @@ defmodule IecWeb.MapLive do
       if params["level"] in Map.keys(@level_atoms), do: params["level"], else: "municipalities"
 
     # A mode the level cannot show (spoilt ballots for wards) falls back to the leader.
-    modes = level |> level_atom() |> MapComponent.modes() |> Enum.map(&Atom.to_string/1)
+    mode_atoms = level |> level_atom() |> MapComponent.modes()
+    modes = Enum.map(mode_atoms, &Atom.to_string/1)
     mode = if params["mode"] in modes, do: params["mode"], else: "leader"
-
-    mode_atom =
-      level |> level_atom() |> MapComponent.modes() |> Enum.find(&(Atom.to_string(&1) == mode))
+    mode_atom = Enum.find(mode_atoms, &(Atom.to_string(&1) == mode))
 
     province_id =
       case Integer.parse(params["province"] || "") do

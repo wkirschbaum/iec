@@ -43,3 +43,11 @@ config :iec, IecWeb.LiveUpdates, refresh_delay: 0, refresh_spread: 0
 
 # Each test changes the data under the pages, so nothing is shared between them.
 config :iec, Iec.Cache, enabled: false
+
+# Overpass requests go to a Req.Test stub, without waiting between tries.
+config :iec, Iec.Places.Overpass,
+  req_options: [plug: {Req.Test, Iec.Places.Overpass}],
+  attempts: 2,
+  first_backoff: 0,
+  max_backoff: 0,
+  second: 0

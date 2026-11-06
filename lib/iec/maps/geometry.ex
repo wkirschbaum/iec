@@ -34,7 +34,9 @@ defmodule Iec.Maps.Geometry do
   defp rings_to_svg(rings, tolerance) do
     rings =
       rings
-      |> Enum.map(fn ring -> ring |> Enum.map(&project/1) |> dedupe() |> simplify(tolerance) end)
+      |> Enum.map(fn ring ->
+        ring |> Enum.map(&project/1) |> Enum.dedup() |> simplify(tolerance)
+      end)
       |> Enum.filter(&(length(&1) >= 4))
 
     case rings do
@@ -47,6 +49,50 @@ defmodule Iec.Maps.Geometry do
         {min_y, max_y} = points |> Enum.map(&elem(&1, 1)) |> Enum.min_max()
         {Enum.map_join(rings, &ring_path/1), {min_x, min_y, max_x, max_y}}
     end
+  end
+
+  @doc "A longitude and latitude in the shared plane, as `{x, y}`."
+  def project_point(longitude, latitude), do: project([longitude, latitude])
+
+  @doc """
+  The rings of a path written by `to_svg/2`, as lists of `{x, y}` points: the path read
+  back, for testing whether a point lies inside it.
+  """
+  def rings(path) do
+    ~r/M(-?\d+) (-?\d+)l([^z]*)z/
+    |> Regex.scan(path, capture: :all_but_first)
+    |> Enum.map(fn [x, y, moves] ->
+      start = {String.to_integer(x), String.to_integer(y)}
+
+      moves
+      |> String.split(" ", trim: true)
+      |> Enum.map(&String.to_integer/1)
+      |> Enum.chunk_every(2)
+      |> Enum.scan(start, fn [delta_x, delta_y], {previous_x, previous_y} ->
+        {previous_x + delta_x, previous_y + delta_y}
+      end)
+      |> then(&[start | &1])
+    end)
+  end
+
+  @doc """
+  Whether a point lies inside a shape's rings (even–odd: a point inside a hole is
+  outside).
+  """
+  def contains?(rings, {x, y}) do
+    rings
+    |> Enum.map(fn ring -> crossings(ring, x, y) end)
+    |> Enum.sum()
+    |> rem(2) == 1
+  end
+
+  # How many of a ring's edges a ray from the point towards +x crosses.
+  defp crossings(ring, x, y) do
+    ring
+    |> Enum.zip(tl(ring) ++ [hd(ring)])
+    |> Enum.count(fn {{x1, y1}, {x2, y2}} ->
+      y1 > y != y2 > y and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1
+    end)
   end
 
   @doc """
@@ -80,8 +126,6 @@ defmodule Iec.Maps.Geometry do
      round((@north - latitude) * @units_per_degree)}
   end
 
-  defp dedupe(points), do: Enum.dedup(points)
-
   # "M x y" then relative "l" moves, closed with "z".
   defp ring_path([{x, y} | rest]) do
     {moves, _last} =
@@ -92,14 +136,14 @@ defmodule Iec.Maps.Geometry do
     "M#{x} #{y}l" <> Enum.join(moves, " ") <> "z"
   end
 
-  @doc "Douglas–Peucker simplification of a closed ring, keeping its first and last point."
-  def simplify(points, tolerance) when length(points) < 4 or tolerance <= 0, do: points
+  # Douglas–Peucker simplification of a closed ring, keeping its first and last point.
+  defp simplify(points, tolerance) when length(points) < 4 or tolerance <= 0, do: points
 
-  def simplify(points, tolerance) do
+  defp simplify(points, tolerance) do
     points
     |> List.to_tuple()
     |> then(fn tuple -> douglas_peucker(tuple, 0, tuple_size(tuple) - 1, tolerance) end)
-    |> then(&[elem(List.to_tuple(points), 0) | &1])
+    |> then(&[hd(points) | &1])
   end
 
   # Returns the kept points after `first`, up to and including `last`.
@@ -125,15 +169,15 @@ defmodule Iec.Maps.Geometry do
   end
 
   defp distance_to_segment({x, y}, {x1, y1}, {x2, y2}) do
-    dx = x2 - x1
-    dy = y2 - y1
-    length_squared = dx * dx + dy * dy
+    delta_x = x2 - x1
+    delta_y = y2 - y1
+    length_squared = delta_x * delta_x + delta_y * delta_y
 
     if length_squared == 0 do
       :math.sqrt((x - x1) ** 2 + (y - y1) ** 2)
     else
-      t = max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / length_squared))
-      :math.sqrt((x - (x1 + t * dx)) ** 2 + (y - (y1 + t * dy)) ** 2)
+      fraction = max(0.0, min(1.0, ((x - x1) * delta_x + (y - y1) * delta_y) / length_squared))
+      :math.sqrt((x - (x1 + fraction * delta_x)) ** 2 + (y - (y1 + fraction * delta_y)) ** 2)
     end
   end
 end

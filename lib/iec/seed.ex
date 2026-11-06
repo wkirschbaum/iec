@@ -10,7 +10,7 @@ defmodule Iec.Seed do
   Every step is idempotent, so running it again only adds what changed.
   """
 
-  alias Iec.{Maps, Parties, Results}
+  alias Iec.{Maps, Parties, Places, Results}
   alias Iec.Results.Feed
 
   def run(report \\ &IO.puts/1) do
@@ -32,6 +32,9 @@ defmodule Iec.Seed do
 
     report.("Map outlines (provinces, municipalities, wards; about 80 MB)")
     Maps.import_boundaries()
+
+    report.("Town and suburb names (OpenStreetMap, through the Overpass API; four queries)")
+    report.("  #{inspect(Places.import_places())}")
 
     report.("#{live.year} municipality files: wards and every party standing (a few minutes)")
     Parties.import_municipality_files()

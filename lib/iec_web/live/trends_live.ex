@@ -74,7 +74,10 @@ defmodule IecWeb.TrendsLive do
       count_progress={@count_progress}
       active={:trends}
     >
-      <.page_header eyebrow={"Local elections since #{@first_year}"} title="Trends">
+      <.page_header
+        eyebrow={if @first_year, do: "Local elections since #{@first_year}", else: "Local elections"}
+        title="Trends"
+      >
         <:lede :if={@summary}>{@summary}</:lede>
       </.page_header>
 

@@ -68,10 +68,13 @@ defmodule IecWeb.ContestsLive do
         wards: length(wards),
         closest_council_margin: format_points(closest_council && closest_council.margin),
         closest_council_name: closest_council && closest_council.name,
+        closest_council_path:
+          closest_council && ~p"/municipalities/#{closest_council.municipality_id}",
         closest_ward_margin: format_points(closest_ward && closest_ward.margin),
         closest_ward_name:
           closest_ward &&
-            "#{closest_ward.municipality_name} · ward #{closest_ward.ward_number}"
+            "#{closest_ward.municipality_name} · ward #{closest_ward.ward_number}",
+        closest_ward_path: closest_ward && ~p"/wards/#{closest_ward.ward_id}"
       }
     )
   end
@@ -82,6 +85,9 @@ defmodule IecWeb.ContestsLive do
   def handle_event("show_more", %{"table" => table}, socket) when table in @tables do
     {:noreply, update(socket, :shown, &Map.update!(&1, table, fn shown -> shown + @more end))}
   end
+
+  # Anything else (a stale or crafted event) changes nothing.
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
 
   # A table's rows in the chosen order, as many as it shows.
   defp table_view(rows, sort, shown) do
@@ -126,10 +132,14 @@ defmodule IecWeb.ContestsLive do
           of {format_number(@stats.wards)} contested
         </.kpi>
         <.kpi label="Closest council" value={@stats.closest_council_margin}>
-          {@stats.closest_council_name}
+          <.link :if={@stats.closest_council_path} navigate={@stats.closest_council_path} class="link">
+            {@stats.closest_council_name}
+          </.link>
         </.kpi>
         <.kpi label="Closest ward" value={@stats.closest_ward_margin}>
-          {@stats.closest_ward_name}
+          <.link :if={@stats.closest_ward_path} navigate={@stats.closest_ward_path} class="link">
+            {@stats.closest_ward_name}
+          </.link>
         </.kpi>
       </section>
 
@@ -186,7 +196,7 @@ defmodule IecWeb.ContestsLive do
                   first="asc"
                   align="right"
                 >
-                  Votes
+                  Votes apart
                 </.sort_header>
                 <.sort_header
                   table="council-contests"
@@ -236,7 +246,11 @@ defmodule IecWeb.ContestsLive do
               </tr>
             </tbody>
           </table>
-          <.show_more table="council-contests" view={@council_table} />
+          <.show_more
+            table="council-contests"
+            shown={@council_table.shown}
+            total={@council_table.total}
+          />
         </div>
       </section>
 
@@ -260,7 +274,7 @@ defmodule IecWeb.ContestsLive do
                   Leader
                 </.sort_header>
                 <.sort_header table="ward-contests" column="leader_share" sorts={@sorts} align="right">
-                  Share
+                  Leader share
                 </.sort_header>
                 <.sort_header table="ward-contests" column="runner_up" sorts={@sorts} first="asc">
                   Runner-up
@@ -271,7 +285,7 @@ defmodule IecWeb.ContestsLive do
                   sorts={@sorts}
                   align="right"
                 >
-                  Share
+                  Runner-up share
                 </.sort_header>
                 <.sort_header
                   table="ward-contests"
@@ -308,7 +322,7 @@ defmodule IecWeb.ContestsLive do
               </tr>
             </tbody>
           </table>
-          <.show_more table="ward-contests" view={@ward_table} />
+          <.show_more table="ward-contests" shown={@ward_table.shown} total={@ward_table.total} />
         </div>
       </section>
     </Layouts.app>
@@ -348,23 +362,6 @@ defmodule IecWeb.ContestsLive do
         {format_number(@contest.margin_votes)} votes apart · {format_progress(@contest.counted)} counted
       </p>
     </.link>
-    """
-  end
-
-  attr :table, :string, required: true
-  attr :view, :map, required: true
-
-  defp show_more(assigns) do
-    ~H"""
-    <button
-      :if={@view.shown < @view.total}
-      type="button"
-      class="btn btn-ghost btn-sm mt-2"
-      phx-click="show_more"
-      phx-value-table={@table}
-    >
-      Show more <span class="opacity-60">({@view.shown} of {@view.total})</span>
-    </button>
     """
   end
 end

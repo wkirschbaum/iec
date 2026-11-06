@@ -2,7 +2,7 @@ defmodule IecWeb.ResultsComponents do
   @moduledoc "Tables, progress bars and change entries shared by the results pages."
   use IecWeb, :html
 
-  alias Iec.Results.{Change, Snapshot}
+  alias Iec.Results.Change
 
   # South Africa has no daylight saving: SAST is always UTC+2.
   @sast_offset_seconds 2 * 60 * 60
@@ -83,7 +83,9 @@ defmodule IecWeb.ResultsComponents do
   def format_progress(complete, expected),
     do: format_progress(percentage_of(complete, expected))
 
-  def format_progress(percentage), do: :erlang.float_to_binary(percentage / 1, decimals: 1) <> "%"
+  # Rounded down, so a count still running never reads 100.0%.
+  def format_progress(percentage),
+    do: :erlang.float_to_binary(Float.floor(percentage / 1, 1), decimals: 1) <> "%"
 
   def party_abbreviation(parties, party_result) do
     case party_result.party_id do
@@ -106,6 +108,7 @@ defmodule IecWeb.ResultsComponents do
   def area_path(%{level: :national}), do: ~p"/"
   def area_path(%{level: :province, area_id: id}), do: ~p"/provinces/#{id}"
   def area_path(%{level: :municipality, area_id: id}), do: ~p"/municipalities/#{id}"
+  def area_path(%{level: :ward, area_id: id}), do: ~p"/wards/#{id}"
 
   ## Components
 
@@ -192,89 +195,6 @@ defmodule IecWeb.ResultsComponents do
     ~H"""
     <span :if={@ward.declared_before_tracking}>before {format_time(@ward.declared_at)}</span>
     <span :if={not @ward.declared_before_tracking}>{format_time(@ward.declared_at)}</span>
-    """
-  end
-
-  attr :label, :string, required: true
-  attr :complete, :integer
-  attr :expected, :integer
-
-  def progress(assigns) do
-    assigns = assign(assigns, :percentage, percentage_of(assigns.complete, assigns.expected))
-
-    ~H"""
-    <div class="space-y-1">
-      <div class="flex justify-between text-sm">
-        <span class="opacity-75">{@label}</span>
-        <span class="tabular-nums">
-          {format_number(@complete)} / {format_number(@expected)}
-          <span class="opacity-60">({format_progress(@complete, @expected)})</span>
-        </span>
-      </div>
-      <progress class="progress progress-primary w-full" value={@percentage} max="100" />
-    </div>
-    """
-  end
-
-  attr :snapshot, Snapshot, required: true
-
-  def progress_grid(assigns) do
-    ~H"""
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <.progress
-        label="Voting districts"
-        complete={@snapshot.voting_districts_complete}
-        expected={@snapshot.voting_districts_expected}
-      />
-      <.progress
-        label="Wards"
-        complete={@snapshot.wards_complete}
-        expected={@snapshot.wards_expected}
-      />
-      <.progress
-        label="Councils"
-        complete={@snapshot.municipalities_complete}
-        expected={@snapshot.municipalities_expected}
-      />
-      <.progress
-        label="Seats"
-        complete={@snapshot.seats_complete}
-        expected={@snapshot.seats_expected}
-      />
-    </div>
-    """
-  end
-
-  attr :snapshot, Snapshot, required: true
-  attr :previous_election, Snapshot, default: nil
-  attr :previous_year, :integer, required: true
-  attr :show_councils, :boolean, default: true
-
-  def turnout(assigns) do
-    ~H"""
-    <dl class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-      <div>
-        <dt class="opacity-60">Registered</dt>
-        <dd class="text-lg tabular-nums">{format_number(@snapshot.registered_voters)}</dd>
-      </div>
-      <div>
-        <dt class="opacity-60">Votes cast</dt>
-        <dd class="text-lg tabular-nums">{format_number(@snapshot.total_votes_cast)}</dd>
-        <dd :if={@previous_election} class="opacity-60 tabular-nums">
-          {@previous_year}: {format_number(@previous_election.total_votes_cast)}
-        </dd>
-      </div>
-      <div>
-        <dt class="opacity-60">Spoilt</dt>
-        <dd class="text-lg tabular-nums">{format_number(@snapshot.spoilt_votes)}</dd>
-      </div>
-      <div :if={@show_councils}>
-        <dt class="opacity-60">Hung / majority councils</dt>
-        <dd class="text-lg tabular-nums">
-          {format_number(@snapshot.hung_councils)} / {format_number(@snapshot.majority_councils)}
-        </dd>
-      </div>
-    </dl>
     """
   end
 
@@ -488,6 +408,7 @@ defmodule IecWeb.ResultsComponents do
         @dimmed && "opacity-30 hover:opacity-100"
       ]}
       title={ward_chip_title(@ward_number, @result, @parties)}
+      aria-label={ward_chip_title(@ward_number, @result, @parties)}
     >
       <span
         class={[
@@ -523,6 +444,26 @@ defmodule IecWeb.ResultsComponents do
       :for={{text, matched} <- @segments}
       class={matched && "rounded-sm bg-primary/15 text-primary"}
     >{text}</span></span>
+    """
+  end
+
+  attr :event, :string, default: "show_more"
+  attr :table, :string, required: true, doc: "the table it belongs to, sent with the event"
+  attr :shown, :integer, required: true
+  attr :total, :integer, required: true
+
+  @doc "Shows more rows of a long table: \"Show more (25 of 120)\", until all are shown."
+  def show_more(assigns) do
+    ~H"""
+    <button
+      :if={@shown < @total}
+      type="button"
+      class="btn btn-ghost mt-2 min-h-10"
+      phx-click={@event}
+      phx-value-table={@table}
+    >
+      Show more <span class="opacity-60">({@shown} of {@total})</span>
+    </button>
     """
   end
 
@@ -625,7 +566,7 @@ defmodule IecWeb.ResultsComponents do
           <span :if={party.seats != 0} class={delta_class(party.seats)}>
             ({format_delta(party.seats, :count)} seats)
           </span>
-          <span class="opacity-60">{format_delta(party.percentage, :points)} pp</span>
+          <span class="opacity-60">{format_delta(party.percentage, :points)} pts</span>
         </span>
       </div>
     </li>

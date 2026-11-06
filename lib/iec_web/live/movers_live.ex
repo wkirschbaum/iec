@@ -170,14 +170,14 @@ defmodule IecWeb.MoversLive do
               class="badge badge-ghost badge-sm"
               title="Swing measured from zero"
             >
-              no 2021 figure
+              no {@previous_year} figure
             </span>
             <span class={[
               "ml-auto text-lg font-semibold tabular-nums",
               @tone == "success" && "text-success",
               @tone == "error" && "text-error"
             ]}>
-              {format_delta(row.swing, :points)} pp
+              {format_delta(row.swing, :points)} pts
             </span>
           </div>
           <div class="ml-8 mt-1 h-1.5 rounded-full bg-base-200">
@@ -196,10 +196,13 @@ defmodule IecWeb.MoversLive do
               <span class="opacity-70">from {format_percentage(row.previous_share)}</span>
             </span>
             <span :if={row.wards_gained + row.wards_lost > 0}>
-              wards +{row.wards_gained} / −{row.wards_lost}
+              wards {format_delta(row.wards_gained, :count)} / {format_delta(-row.wards_lost, :count)}
             </span>
             <span :if={row.councils_gained + row.councils_lost > 0}>
-              councils +{row.councils_gained} / −{row.councils_lost}
+              councils {format_delta(row.councils_gained, :count)} / {format_delta(
+                -row.councils_lost,
+                :count
+              )}
             </span>
           </div>
         </li>
@@ -283,42 +286,46 @@ defmodule IecWeb.MoversLive do
     <div id={@id} class="panel space-y-4 p-5">
       <h2 class="text-lg font-semibold">{@title}</h2>
       <p :if={@rows == []} class="text-sm opacity-60">None so far.</p>
-      <table :if={@rows != []} class="table table-sm">
-        <thead>
-          <tr>
-            <.sort_header table={@id} column="party" sorts={@sorts} first="asc">Party</.sort_header>
-            <.sort_header table={@id} column="municipality_name" sorts={@sorts} first="asc">
-              Municipality
-            </.sort_header>
-            <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
-              {@previous_year}
-            </.sort_header>
-            <.sort_header table={@id} column="share" sorts={@sorts} align="right">Now</.sort_header>
-            <.sort_header table={@id} column="swing" sorts={@sorts} align="right">Swing</.sort_header>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            :for={row <- sort_rows(@rows, @sorts[@id])}
-            id={"#{@id}-#{row.party_id}-#{row.municipality_id}"}
-          >
-            <td><.party_label parties={@parties} party_result={row} /></td>
-            <td>
-              <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
-                {row.municipality_name}
-              </.link>
-              <span :if={not row.complete} class="badge badge-ghost badge-xs">counting</span>
-            </td>
-            <td class="text-right tabular-nums opacity-60">
-              {format_percentage(row.previous_share)}
-            </td>
-            <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
-            <td class={["text-right font-semibold tabular-nums", delta_class(row.swing)]}>
-              {format_delta(row.swing, :points)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div :if={@rows != []} class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <.sort_header table={@id} column="party" sorts={@sorts} first="asc">Party</.sort_header>
+              <.sort_header table={@id} column="municipality_name" sorts={@sorts} first="asc">
+                Municipality
+              </.sort_header>
+              <.sort_header table={@id} column="previous_share" sorts={@sorts} align="right">
+                {@previous_year}
+              </.sort_header>
+              <.sort_header table={@id} column="share" sorts={@sorts} align="right">Now</.sort_header>
+              <.sort_header table={@id} column="swing" sorts={@sorts} align="right">
+                Swing
+              </.sort_header>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              :for={row <- sort_rows(@rows, @sorts[@id])}
+              id={"#{@id}-#{row.party_id}-#{row.municipality_id}"}
+            >
+              <td><.party_label parties={@parties} party_result={row} /></td>
+              <td>
+                <.link navigate={~p"/municipalities/#{row.municipality_id}"} class="link">
+                  {row.municipality_name}
+                </.link>
+                <span :if={not row.complete} class="badge badge-ghost badge-xs">counting</span>
+              </td>
+              <td class="text-right tabular-nums opacity-60">
+                {format_percentage(row.previous_share)}
+              </td>
+              <td class="text-right tabular-nums">{format_percentage(row.share)}</td>
+              <td class={["text-right font-semibold tabular-nums", delta_class(row.swing)]}>
+                {format_delta(row.swing, :points)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     """
   end

@@ -77,7 +77,10 @@ defmodule Iec.Results.Parser do
       |> Enum.map(&party_result/1)
       |> Enum.sort_by(& &1.position)
 
-    totals = Enum.find(data["PartyBallotResults"] || [], %{}, &(&1["RegisteredVoters"] > 0))
+    totals =
+      Enum.find(data["PartyBallotResults"] || [], %{}, fn party ->
+        is_integer(party["RegisteredVoters"]) and party["RegisteredVoters"] > 0
+      end)
 
     attributes = %{
       level: level,

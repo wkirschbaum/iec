@@ -50,12 +50,7 @@ defmodule Iec.Maps do
 
       case Feed.get(url, %{etag: nil, last_modified: nil}, receive_timeout: :timer.minutes(3)) do
         {:ok, %{"features" => features}, _body, _cache} ->
-          Repo.delete_all(
-            from boundary in Boundary,
-              where: boundary.election == ^election.year and boundary.level == ^level
-          )
-
-          insert_boundaries(election.year, level, features, tolerance)
+          store_boundaries(election.year, level, features, tolerance)
 
         other ->
           Logger.warning("Map outlines: #{url} failed (#{inspect(other)})")
@@ -63,6 +58,7 @@ defmodule Iec.Maps do
     end
 
     mark_redrawn_wards(live.year, previous.year)
+    Iec.Cache.invalidate()
   end
 
   # Stored and complete: wards of the live election also need their overview outline.
@@ -78,9 +74,38 @@ defmodule Iec.Maps do
     |> Repo.exists?()
   end
 
-  defp insert_boundaries(year, level, features, tolerance) do
-    now = DateTime.utc_now()
+  # Replaces one outline set in a single transaction, so a failure leaves the old set (or
+  # none) and the set is tried again on the next run, never stored half. Ward files name
+  # their municipality but not always its id, so wards lacking it wait for the
+  # municipality outlines (which give the id by name).
+  defp store_boundaries(year, level, features, tolerance) do
     municipality_ids = municipality_ids_by_name()
+    rows = boundary_rows(year, level, features, tolerance, municipality_ids)
+
+    if level == :ward and municipality_ids == %{} and
+         Enum.any?(rows, &is_nil(&1.municipality_id)) do
+      Logger.warning("Map outlines: #{year} wards skipped until municipality outlines are stored")
+    else
+      Repo.transact(
+        fn ->
+          Repo.delete_all(
+            from boundary in Boundary,
+              where: boundary.election == ^year and boundary.level == ^level
+          )
+
+          rows
+          |> Enum.chunk_every(1_000)
+          |> Enum.each(&Repo.insert_all(Boundary, &1, on_conflict: :nothing))
+
+          {:ok, length(rows)}
+        end,
+        timeout: :timer.minutes(5)
+      )
+    end
+  end
+
+  defp boundary_rows(year, level, features, tolerance, municipality_ids) do
+    now = DateTime.utc_now()
 
     features
     |> Enum.flat_map(fn %{"properties" => properties, "geometry" => geometry} ->
@@ -114,48 +139,44 @@ defmodule Iec.Maps do
       end
     end)
     |> Enum.uniq_by(& &1.area_id)
-    |> Enum.chunk_every(1_000)
-    |> Enum.each(&Repo.insert_all(Boundary, &1, on_conflict: :nothing))
   end
 
   # A ward counts as redrawn when the previous election's ward with its id covers a
   # clearly different area: its area changed by more than about a fifth, or the two
   # bounding boxes overlap by less than 75%. Smaller edits still count as the same ward.
   defp mark_redrawn_wards(live_year, previous_year) do
-    previous =
-      Repo.all(
-        from boundary in Boundary,
-          where: boundary.election == ^previous_year and boundary.level == :ward
-      )
-      |> Map.new(&{&1.area_id, &1})
+    previous = ward_shapes(previous_year) |> Map.new(&{&1.area_id, &1})
 
     redrawn =
-      for ward <-
-            Repo.all(
-              from boundary in Boundary,
-                where: boundary.election == ^live_year and boundary.level == :ward
-            ),
+      for ward <- ward_shapes(live_year),
           before = previous[ward.area_id],
           before != nil and reshaped?(ward, before),
           do: ward.area_id
 
-    Repo.update_all(
-      from(boundary in Boundary,
+    live_wards =
+      from boundary in Boundary,
         where: boundary.election == ^live_year and boundary.level == :ward
-      ),
-      set: [redrawn: false]
-    )
 
-    Repo.update_all(
-      from(boundary in Boundary,
-        where:
-          boundary.election == ^live_year and boundary.level == :ward and
-            boundary.area_id in ^redrawn
-      ),
-      set: [redrawn: true]
-    )
+    Repo.transact(fn ->
+      Repo.update_all(live_wards, set: [redrawn: false])
+
+      Repo.update_all(where(live_wards, [boundary], boundary.area_id in ^redrawn),
+        set: [redrawn: true]
+      )
+
+      {:ok, length(redrawn)}
+    end)
 
     :ok
+  end
+
+  # Only what the comparison needs: the outlines themselves are large.
+  defp ward_shapes(year) do
+    Repo.all(
+      from boundary in Boundary,
+        where: boundary.election == ^year and boundary.level == :ward,
+        select: map(boundary, [:area_id, :area, :min_x, :min_y, :max_x, :max_y])
+    )
   end
 
   defp reshaped?(ward, before) do

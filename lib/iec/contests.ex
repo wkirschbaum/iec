@@ -24,13 +24,8 @@ defmodule Iec.Contests do
   """
   def lead(nil), do: nil
 
-  def lead(%Snapshot{party_results: party_results}) do
-    ranked =
-      party_results
-      |> Enum.filter(&(&1.party_id >= 0 and (&1.total_valid_votes || 0) > 0))
-      |> Enum.sort_by(& &1.total_valid_votes, :desc)
-
-    case ranked do
+  def lead(%Snapshot{} = snapshot) do
+    case Results.ranked_parties(snapshot) do
       [leader, runner_up | _others] ->
         %{
           leader: leader,

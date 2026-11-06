@@ -5,7 +5,7 @@ defmodule IecWeb.WardLive do
   import IecWeb.DesignComponents
   import IecWeb.ChartComponents
 
-  alias Iec.{Contests, Maps, Parties, Results, Wards}
+  alias Iec.{Contests, Maps, Parties, Places, Results, Wards}
   alias IecWeb.{Narrative, TableRows, Trends}
 
   # Parties shown at first, and how many more each "Show more" adds.
@@ -17,16 +17,10 @@ defmodule IecWeb.WardLive do
 
   @impl Phoenix.LiveView
   def mount(%{"id" => id}, _session, socket) do
-    ward_id =
-      case Integer.parse(id) do
-        {ward_id, ""} -> ward_id
-        _not_a_ward -> nil
-      end
-
     {:ok,
      socket
      |> assign(
-       ward_id: ward_id,
+       ward_id: IecWeb.Params.id(id),
        parties_shown: @page_size,
        live_year: Results.live_year(),
        previous_year: Results.previous_year()
@@ -45,6 +39,9 @@ defmodule IecWeb.WardLive do
   @impl Phoenix.LiveView
   def handle_event("show_more", %{"table" => "ward-parties"}, socket),
     do: {:noreply, update(socket, :parties_shown, &(&1 + @more))}
+
+  # Anything else (a stale or crafted event) changes nothing.
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
 
   defp load(%{ward_id: nil}), do: %{page_title: "Ward", ward: nil}
 
@@ -68,7 +65,7 @@ defmodule IecWeb.WardLive do
 
         nearby_ids = Maps.list_nearby_ward_ids(ward_id)
         # The search's index, shared with it.
-        index = Iec.Cache.fetch(:ward_index, fn -> Wards.build_index(Wards.list_directory()) end)
+        index = Iec.Cache.fetch(:ward_index, &Wards.build_index/0)
 
         nearby_by_id =
           index.wards |> Enum.filter(&(&1.ward_id in nearby_ids)) |> Map.new(&{&1.ward_id, &1})
@@ -96,6 +93,8 @@ defmodule IecWeb.WardLive do
           summary: Narrative.ward(ward, lead, parties, previous_year),
           lead: lead,
           previous_lead: previous_lead,
+          # Towns and suburbs whose point lies in the ward, the biggest first.
+          places: ward_id |> Places.list_ward_places() |> Enum.take(8),
           party_rows: party_rows,
           trend: Trends.from_shares(party_rows, parties, {previous_year, live_year}),
           council_trend: council_trend,
@@ -119,10 +118,13 @@ defmodule IecWeb.WardLive do
       feed_status={@feed_status}
       count_progress={@count_progress}
     >
-      <div :if={is_nil(@ward)} class="panel space-y-2 p-6 text-base-content/70">
-        <p>There is no such ward in the {@live_year} ward directory.</p>
-        <.link navigate={~p"/wards"} class="link">Find your ward</.link>
-      </div>
+      <.page_header :if={is_nil(@ward)} eyebrow="Ward" title="Not found">
+        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
+        <:lede>
+          There is no such ward in the {@live_year} ward directory.
+          <.link navigate={~p"/wards"} class="link">Find your ward</.link>
+        </:lede>
+      </.page_header>
 
       <div :if={@ward} class="space-y-12">
         <.page_header
@@ -151,6 +153,11 @@ defmodule IecWeb.WardLive do
             </span>
           </:breadcrumb>
           <:lede :if={@summary}>{@summary.headline}. {@summary.lede}</:lede>
+          <:lede :if={@places != []}>
+            <span id="ward-places" class="block text-base text-base-content/60">
+              Takes in {join_names(@places)}.
+            </span>
+          </:lede>
           <:lede :if={is_nil(@summary)}>
             No party has votes in this ward yet. It fills in as the party files report.
           </:lede>
@@ -309,6 +316,12 @@ defmodule IecWeb.WardLive do
     """
   end
 
+  # "A, B and C".
+  defp join_names([only]), do: only
+
+  defp join_names(names),
+    do: Enum.join(Enum.drop(names, -1), ", ") <> " and " <> List.last(names)
+
   attr :id, :string, required: true
   attr :rows, :list, required: true
   attr :parties, :map, required: true
@@ -358,15 +371,7 @@ defmodule IecWeb.WardLive do
           </tr>
         </tbody>
       </table>
-      <button
-        :if={length(@visible) < @total}
-        type="button"
-        class="btn btn-ghost btn-sm mt-2"
-        phx-click="show_more"
-        phx-value-table={@id}
-      >
-        Show more <span class="opacity-60">({length(@visible)} of {@total})</span>
-      </button>
+      <.show_more table={@id} shown={length(@visible)} total={@total} />
       <p class="mt-2 text-sm opacity-60">
         Shares are of all the ward's votes, from the party files of the parties the app
         follows; the seat goes to whoever wins the ward ballot. Council: the party's share

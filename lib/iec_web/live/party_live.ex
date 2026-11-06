@@ -16,7 +16,8 @@ defmodule IecWeb.PartyLive do
 
   @impl Phoenix.LiveView
   def mount(%{"id" => id}, _session, socket) do
-    party_id = String.to_integer(id)
+    party_id = IecWeb.Params.id(id)
+
     previous_year = Results.previous_year()
 
     {:ok,
@@ -32,6 +33,9 @@ defmodule IecWeb.PartyLive do
   end
 
   @impl IecWeb.LiveUpdates
+  def refresh(%{assigns: %{party_id: nil}} = socket),
+    do: assign(socket, page_title: "Party", found: false)
+
   def refresh(socket) do
     assign(socket, Iec.Cache.fetch(cache_key(socket.assigns), fn -> load(socket.assigns) end))
   end
@@ -52,6 +56,9 @@ defmodule IecWeb.PartyLive do
       )
 
     Map.new(
+      # A party is known from the IEC's party lists, or from results before those load.
+      found:
+        Map.has_key?(parties, party_id) or overview.wards != [] or overview.municipalities != [],
       page_title: party_abbreviation(parties, %{party_id: party_id}),
       stats: summary.stats,
       lede:
@@ -76,11 +83,34 @@ defmodule IecWeb.PartyLive do
     {:noreply, update(socket, :expanded_sections, &MapSet.put(&1, section))}
   end
 
+  # Anything else (a stale or crafted event) changes nothing.
+  def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  # Whether the national count is still running, from the footer's figures.
+  defp counting?(%{voting_districts_complete: complete, voting_districts_expected: expected})
+       when is_integer(complete) and is_integer(expected),
+       do: complete < expected
+
+  defp counting?(_progress), do: false
+
   defp toggle(set, member) do
     if MapSet.member?(set, member), do: MapSet.delete(set, member), else: MapSet.put(set, member)
   end
 
   @impl Phoenix.LiveView
+  def render(%{found: false} = assigns) do
+    ~H"""
+    <Layouts.app flash={@flash} feed_status={@feed_status} count_progress={@count_progress}>
+      <.page_header eyebrow="Party" title="Not found">
+        <:breadcrumb><.link navigate={~p"/"} class="link-hover link">Overview</.link> /</:breadcrumb>
+        <:lede>
+          No party on the IEC's lists has this id. Every party name on the site links to its page.
+        </:lede>
+      </.page_header>
+    </Layouts.app>
+    """
+  end
+
   def render(assigns) do
     assigns =
       assign(assigns,
@@ -99,7 +129,7 @@ defmodule IecWeb.PartyLive do
         <:lede :if={@lede}>{@lede}</:lede>
       </.page_header>
 
-      <.stats stats={@stats} previous_year={@previous_year} />
+      <.stats stats={@stats} previous_year={@previous_year} counting={counting?(@count_progress)} />
 
       <section id="at-a-glance" class="space-y-4">
         <.section_heading title="At a glance">
@@ -164,7 +194,7 @@ defmodule IecWeb.PartyLive do
           <:subtitle>Ward seats against {@previous_year}</:subtitle>
         </.section_heading>
         <p :if={not @has_wards} class="opacity-60">
-          No ward results yet. The party file is fetched when the page opens.
+          No ward results yet; they fill in as the party files report.
         </p>
         <.ward_section
           :for={view <- @ward_sections}
@@ -196,21 +226,24 @@ defmodule IecWeb.PartyLive do
 
   attr :stats, :map, required: true
   attr :previous_year, :integer, required: true
+  attr :counting, :boolean, default: false, doc: "running totals, set against final ones"
 
   defp stats(assigns) do
+    assigns = assign(assigns, :so_far, if(assigns.counting, do: " so far", else: ""))
+
     ~H"""
     <section id="party-stats" class="panel grid grid-cols-2 gap-x-6 gap-y-7 p-5 sm:p-7 lg:grid-cols-4">
-      <.kpi label="Votes" value={format_number(@stats.votes)}>
+      <.kpi label={"Votes#{@so_far}"} value={format_number(@stats.votes)}>
         {@previous_year}: {format_number(@stats.previous_votes)}
       </.kpi>
       <.kpi label="Share" value={format_percentage(@stats.share)}>
-        <span class={delta_class(@stats.swing)}>{format_delta(@stats.swing, :points)} pp</span>
+        <span class={delta_class(@stats.swing)}>{format_delta(@stats.swing, :points)} pts</span>
         vs {format_percentage(@stats.previous_share)}
       </.kpi>
-      <.kpi label="Seats" value={format_number(@stats.seats)}>
+      <.kpi label={"Seats#{@so_far}"} value={format_number(@stats.seats)}>
         {@previous_year}: {format_number(@stats.previous_seats)}
       </.kpi>
-      <.kpi label="Ward seats" value={format_number(@stats.ward_seats)}>
+      <.kpi label={"Ward seats#{@so_far}"} value={format_number(@stats.ward_seats)}>
         {@previous_year}: {format_number(@stats.previous_ward_seats)}
       </.kpi>
       <.kpi label="Majority councils" value={format_number(@stats.majorities)}>
@@ -516,7 +549,7 @@ defmodule IecWeb.PartyLive do
     ~H"""
     <button
       type="button"
-      class="flex cursor-pointer items-center gap-2 font-medium"
+      class="flex min-h-10 w-full cursor-pointer items-center gap-2 font-medium"
       phx-click="toggle_section"
       phx-value-section={@id}
       aria-expanded={to_string(@open)}
@@ -539,7 +572,7 @@ defmodule IecWeb.PartyLive do
     <button
       :if={@shown < @total}
       type="button"
-      class="btn btn-ghost btn-sm mt-2"
+      class="btn btn-ghost mt-2 min-h-10"
       phx-click="show_all"
       phx-value-section={@id}
     >

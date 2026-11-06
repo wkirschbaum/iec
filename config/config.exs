@@ -32,6 +32,21 @@ config :iec, Iec.Results,
   province_ids: Enum.to_list(1..9),
   poll: true
 
+# Town and suburb names, read once from OpenStreetMap's Overpass API (see Iec.Places
+# and Iec.Places.Overpass). Only the main public instance, whose usage policy is
+# published (under 10,000 queries and 1 GB a day; this import makes four queries, once):
+# https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances
+config :iec, Iec.Places.Overpass,
+  endpoints: ["https://overpass-api.de/api"],
+  user_agent: "iec-results-desk/1.0 (+https://iec-results.fly.dev/about)",
+  # Tries per query, waiting first_backoff, then twice as long each time.
+  attempts: 5,
+  first_backoff: :timer.seconds(30),
+  max_backoff: :timer.minutes(10),
+  # The longest wait for a free query slot, and how long a second is (tests shorten it).
+  max_slot_wait_seconds: 600,
+  second: 1_000
+
 # Configure the endpoint
 config :iec, IecWeb.Endpoint,
   url: [host: "localhost"],

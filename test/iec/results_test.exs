@@ -87,6 +87,21 @@ defmodule Iec.ResultsTest do
     end
   end
 
+  describe "Parser.parse/2" do
+    test "takes the totals from a party with registered voters, skipping those without" do
+      data = %{
+        "PartyBallotResults" => [
+          Map.put(party(7, "ANC", 500, 3), "RegisteredVoters", nil),
+          Map.put(party(52, "DA", 400, 2), "RegisteredVoters", 0),
+          Map.put(party(1, "IFP", 100, 1), "RegisteredVoters", 3000)
+        ]
+      }
+
+      assert [%{registered_voters: 3000, total_votes_cast: 1010}] =
+               Iec.Results.Parser.parse(:national, data)
+    end
+  end
+
   describe "Change.compare/1" do
     test "reports progress, vote and leader changes" do
       ingest(province_file("2026-11-06T07:00:00+02:00", 300, 6))

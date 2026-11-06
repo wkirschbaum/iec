@@ -86,8 +86,8 @@ defmodule Iec.Wards.NameMatch do
     |> String.trim()
   end
 
-  @doc "The places people know a municipality by (`@places`), from its name."
-  def places(name) do
+  # The places people know a municipality by (`@places`), from its name.
+  defp places(name) do
     normalised = normalise(name)
 
     @places
@@ -128,20 +128,41 @@ defmodule Iec.Wards.NameMatch do
   end
 
   @doc """
-  A name made ready for matching once, for matching it many times: its parts (words
-  and what lies between), its normalised words, and its places' words.
+  A municipality's name made ready for matching once, for matching it many times: its
+  parts (words and what lies between), its normalised words, and the places it holds
+  (`@places`), with the first letters of all their words.
   """
-  def prepare(name) do
+  def prepare(name), do: prepare(name, places(name))
+
+  @doc "A town or suburb's name made ready like `prepare/1`, with its own other names."
+  def prepare_place(name, other_names), do: prepare(name, Enum.map(other_names, &normalise/1))
+
+  defp prepare(name, other_names) do
     parts = Regex.split(~r/[\p{L}\p{N}]+/u, name, include_captures: true)
+    tokens = for {part, index} <- Enum.with_index(parts), rem(index, 2) == 1, do: normalise(part)
+
+    places =
+      other_names
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(&{&1, String.split(&1)})
 
     %{
       name: name,
       parts: parts,
-      tokens:
-        for({part, index} <- Enum.with_index(parts), rem(index, 2) == 1, do: normalise(part)),
-      places: Enum.map(places(name), &{&1, String.split(&1)})
+      tokens: tokens,
+      places: places,
+      initials:
+        (tokens ++ Enum.flat_map(places, &elem(&1, 1)))
+        |> MapSet.new(&String.first/1)
     }
   end
+
+  @doc """
+  Whether a prepared name could match the words at all: each must start like one of its
+  words. A cheap test before `match/2`, for long lists of names.
+  """
+  def possible?(%{initials: initials}, words),
+    do: Enum.all?(words, &MapSet.member?(initials, String.first(&1)))
 
   # Matches the words against the name's own words, keeping what to highlight.
   defp match_name(%{parts: parts, tokens: tokens}, words) do

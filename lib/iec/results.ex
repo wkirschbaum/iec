@@ -42,11 +42,15 @@ defmodule Iec.Results do
   before anyone has votes.
   """
   def leading_party(nil), do: nil
+  def leading_party(snapshot), do: snapshot |> ranked_parties() |> List.first()
 
-  def leading_party(%Snapshot{party_results: party_results}) do
+  @doc """
+  A snapshot's parties with votes (parties only, not "Other"), most valid votes first.
+  """
+  def ranked_parties(%Snapshot{party_results: party_results}) do
     party_results
     |> Enum.filter(&(&1.party_id >= 0 and (&1.total_valid_votes || 0) > 0))
-    |> Enum.max_by(& &1.total_valid_votes, fn -> nil end)
+    |> Enum.sort_by(& &1.total_valid_votes, :desc)
   end
 
   @doc "The change in vote share in percentage points, or nil when either side is missing."
@@ -128,18 +132,23 @@ defmodule Iec.Results do
   Imports the previous election's final results, file by file, skipping files already
   stored (so a failed file is retried on the next start). Its files no longer change.
   """
-  def import_previous_election, do: import_election(Feed.previous_election())
+  def import_previous_election do
+    import_election(Feed.previous_election())
+    Iec.Cache.invalidate()
+  end
 
   @doc """
-  Imports the earlier elections (config `history_elections`) for the trends: national
-  and province results, once each.
+  Imports the earlier elections (config `history_elections`) for the trends, once each:
+  national and province results, and the municipality snapshots the province files
+  carry. Municipality ids are stable from 2000 on, but an id spans re-demarcations, so
+  its area need not be the same in every election.
   """
   def import_history do
     for election <- Feed.all_elections(),
         election.year not in [live_year(), previous_year()],
         do: import_election(election)
 
-    :ok
+    Iec.Cache.invalidate()
   end
 
   @doc "Imports an election's national and province files not stored yet."
@@ -160,6 +169,7 @@ defmodule Iec.Results do
   def import_feed(feed) do
     case Feed.get(feed.url) do
       {:ok, data, body, cache} -> ingest(feed, data, body, cache.validators)
+      {:error, _reason} = error -> error
       other -> {:error, other}
     end
   end
@@ -172,7 +182,8 @@ defmodule Iec.Results do
     now = DateTime.utc_now()
 
     for election <- Feed.all_elections(),
-        {:ok, parties, _body, _cache} <- [Feed.get(Feed.party_list_url(election))] do
+        parties = party_list(election),
+        parties != nil do
       rows =
         for party <- parties,
             is_integer(party["ID"]) and party["ID"] > 0,
@@ -196,6 +207,17 @@ defmodule Iec.Results do
 
     broadcast(:parties_refreshed)
     :ok
+  end
+
+  defp party_list(election) do
+    case Feed.get(Feed.party_list_url(election)) do
+      {:ok, parties, _body, _cache} when is_list(parties) ->
+        parties
+
+      other ->
+        Logger.warning("#{election.year} party list: download failed (#{inspect(other)})")
+        nil
+    end
   end
 
   @doc "Every known party, keyed by id."

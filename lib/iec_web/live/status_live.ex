@@ -26,14 +26,16 @@ defmodule IecWeb.StatusLive do
     assign(socket,
       system: Status.system(),
       imports: Status.imports(),
-      feed_statuses: Iec.Results.Poller.statuses()
+      # Every poller, party files included (`@feed_statuses` from LiveUpdates holds only
+      # the main feeds, and drives the header).
+      poller_statuses: Iec.Results.Poller.statuses()
     )
   end
 
   @impl Phoenix.LiveView
   def render(assigns) do
     {main_feeds, party_feeds} =
-      assigns.feed_statuses
+      assigns.poller_statuses
       |> Map.values()
       |> Enum.split_with(&(not String.starts_with?(&1.feed, "party-")))
 
@@ -58,7 +60,9 @@ defmodule IecWeb.StatusLive do
           label="Feeds"
           value={"#{@feed_status.feeds - @feed_status.failing} / #{@feed_status.feeds}"}
         >
-          healthy · {@feed_status.failing} failing
+          {if @feed_status.feeds == 0,
+            do: "polling is off",
+            else: "healthy · #{@feed_status.failing} failing"}
         </.kpi>
         <.kpi label="Last check" value={format_clock(@feed_status.checked_at)}>SAST</.kpi>
         <.kpi label="Memory" value={"#{@system.memory_mb} MB"}>{@system.processes} processes</.kpi>

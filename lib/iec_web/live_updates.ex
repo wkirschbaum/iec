@@ -64,7 +64,9 @@ defmodule IecWeb.LiveUpdates do
      |> assign(
        refresh_scheduled: false,
        refreshed_at: System.monotonic_time(),
-       count_progress: count_progress
+       count_progress: count_progress,
+       # Current names before computing page data that every viewer then shares.
+       parties: Iec.Cache.fetch(:parties, &Results.parties_by_id/0)
      )
      |> announce_count_change(socket.assigns.count_progress, count_progress)
      |> socket.view.refresh()}
@@ -75,7 +77,8 @@ defmodule IecWeb.LiveUpdates do
     {:halt, schedule_refresh(socket)}
   end
 
-  defp handle_info(:wards_mapped, socket), do: {:halt, schedule_refresh(socket)}
+  defp handle_info(message, socket) when message in [:wards_mapped, :places_imported],
+    do: {:halt, schedule_refresh(socket)}
 
   defp handle_info(_message, socket), do: {:cont, socket}
 

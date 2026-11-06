@@ -4,9 +4,9 @@ defmodule Iec.Results.Feed do
 
   The files sit behind Cloudflare with `Cache-Control: max-age=60` and send both `ETag`
   and `Last-Modified`. Each request carries the validators from the previous response,
-  so an unchanged file costs a `304 Not Modified` with no body. `next_poll_in/1` turns
-  the response's `max-age` minus its `Age` into the delay before the next request, so
-  we ask again when the edge copy expires and not before.
+  so an unchanged file costs a `304 Not Modified` with no body. The response's `max-age`
+  minus its `Age` is the delay before the next request, so we ask again when the edge
+  copy expires and not before.
   """
 
   @minimum_delay :timer.seconds(15)
@@ -142,8 +142,8 @@ defmodule Iec.Results.Feed do
     }
   end
 
-  @doc "Milliseconds until the edge copy of this response goes stale."
-  def next_poll_in(response) do
+  # Milliseconds until the edge copy of this response goes stale.
+  defp next_poll_in(response) do
     max_age =
       with value when is_binary(value) <- header(response, "cache-control"),
            [_, seconds] <- Regex.run(~r/(?:^|[,\s])max-age=(\d+)/, value) do

@@ -17,18 +17,9 @@ defmodule IecWeb.Trends do
     threshold = Keyword.get(options, :threshold, 0)
     years = Enum.map(snapshots_by_year, &elem(&1, 0))
 
-    values =
-      for {year, snapshot} <- snapshots_by_year,
-          party <- snapshot.party_results,
-          party.party_id >= 0,
-          value = Map.get(party, field),
-          is_number(value),
-          reduce: %{} do
-        values -> Map.update(values, party.party_id, [{year, value}], &(&1 ++ [{year, value}]))
-      end
-
     series =
-      values
+      snapshots_by_year
+      |> points_by_party(field)
       |> Enum.map(fn {party_id, points} ->
         %{
           party_id: party_id,
@@ -150,7 +141,7 @@ defmodule IecWeb.Trends do
     magnitude = :math.pow(10, Float.floor(:math.log10(peak)))
 
     step =
-      [1, 2, 2.5, 5, 10]
+      [1, 2]
       |> Enum.map(&(&1 * magnitude))
       |> Enum.find(fn step -> peak / step <= 5 end)
 
