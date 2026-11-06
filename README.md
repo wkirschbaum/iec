@@ -1,6 +1,6 @@
 # IEC results
 
-An app that follows South Africa's 2026 Local Government Elections count
+A realtime dashboard that follows South Africa's 2026 Local Government Elections count
 live from the Electoral Commission (IEC), keeps a timestamped history of every change, and
 compares every area, party, council and ward with 2021.
 
