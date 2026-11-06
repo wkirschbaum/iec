@@ -4,6 +4,7 @@ defmodule IecWeb.MapLive do
   import IecWeb.DesignComponents
 
   alias Iec.Results
+  alias IecWeb.MapComponent
 
   @behaviour IecWeb.LiveUpdates
   on_mount {IecWeb.LiveUpdates, [:results, :parties]}
@@ -17,7 +18,6 @@ defmodule IecWeb.MapLive do
      assign(socket,
        page_title: "Map",
        levels: @levels,
-       modes: [{"Leading party", "leader"}, {"Changed since #{Results.previous_year()}", "flips"}],
        provinces: Results.list_area_names(:province) |> Enum.sort_by(&elem(&1, 1))
      )}
   end
@@ -27,7 +27,12 @@ defmodule IecWeb.MapLive do
     level =
       if params["level"] in Map.keys(@level_atoms), do: params["level"], else: "municipalities"
 
-    mode = if params["mode"] == "flips", do: "flips", else: "leader"
+    # A mode the level cannot show (spoilt ballots for wards) falls back to the leader.
+    modes = level |> level_atom() |> MapComponent.modes() |> Enum.map(&Atom.to_string/1)
+    mode = if params["mode"] in modes, do: params["mode"], else: "leader"
+
+    mode_atom =
+      level |> level_atom() |> MapComponent.modes() |> Enum.find(&(Atom.to_string(&1) == mode))
 
     province_id =
       case Integer.parse(params["province"] || "") do
@@ -35,7 +40,14 @@ defmodule IecWeb.MapLive do
         _not_a_province -> nil
       end
 
-    {:noreply, assign(socket, level: level, mode: mode, province_id: province_id)}
+    {:noreply,
+     assign(socket,
+       level: level,
+       mode: mode,
+       mode_atom: mode_atom,
+       modes: Enum.map(modes, &{mode_label(&1), &1}),
+       province_id: province_id
+     )}
   end
 
   # The map component refreshes itself from @refreshed_at.
@@ -43,8 +55,11 @@ defmodule IecWeb.MapLive do
   def refresh(socket), do: socket
 
   defp level_atom(level), do: Map.fetch!(@level_atoms, level)
-  defp mode_atom("flips"), do: :flips
-  defp mode_atom(_leader), do: :leader
+
+  defp mode_label("leader"), do: "Leading party"
+  defp mode_label("flips"), do: "Changed since #{Results.previous_year()}"
+  defp mode_label("margin"), do: "Close contests"
+  defp mode_label("spoilt"), do: "Spoilt ballots"
 
   defp map_path(socket_assigns, changes) do
     params =
@@ -111,10 +126,10 @@ defmodule IecWeb.MapLive do
       </div>
 
       <.live_component
-        module={IecWeb.MapComponent}
+        module={MapComponent}
         id="map"
         level={level_atom(@level)}
-        mode={mode_atom(@mode)}
+        mode={@mode_atom}
         province_id={@province_id}
         parties={@parties}
         refreshed_at={@refreshed_at}

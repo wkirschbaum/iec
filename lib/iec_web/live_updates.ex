@@ -13,7 +13,7 @@ defmodule IecWeb.LiveUpdates do
   coalesced: at most one per second.
   """
   import Phoenix.Component, only: [assign: 2, assign: 3, update: 3]
-  import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1]
+  import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, push_event: 3]
 
   alias Iec.{Parties, Results}
   alias Iec.Results.Poller
@@ -55,13 +55,16 @@ defmodule IecWeb.LiveUpdates do
   end
 
   defp handle_info(:refresh, socket) do
+    count_progress = Results.get_count_progress()
+
     {:halt,
      socket
      |> assign(
        refresh_scheduled: false,
        refreshed_at: System.monotonic_time(),
-       count_progress: Results.get_count_progress()
+       count_progress: count_progress
      )
+     |> announce_count_change(socket.assigns.count_progress, count_progress)
      |> socket.view.refresh()}
   end
 
@@ -73,6 +76,10 @@ defmodule IecWeb.LiveUpdates do
   defp handle_info(:wards_mapped, socket), do: {:halt, schedule_refresh(socket)}
 
   defp handle_info(_message, socket), do: {:cont, socket}
+
+  # The footer pulses faintly when the national count moves (not on every party file).
+  defp announce_count_change(socket, same, same), do: socket
+  defp announce_count_change(socket, _before, _now), do: push_event(socket, "count-updated", %{})
 
   defp schedule_refresh(%{assigns: %{refresh_scheduled: true}} = socket), do: socket
 

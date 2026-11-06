@@ -24,6 +24,7 @@ defmodule IecWeb.Router do
       live "/municipalities/:id", MunicipalityLive
       live "/changes", ChangesLive
       live "/movers", MoversLive
+      live "/close-contests", ContestsLive
       live "/map", MapLive
       live "/trends", TrendsLive
       live "/about", AboutLive

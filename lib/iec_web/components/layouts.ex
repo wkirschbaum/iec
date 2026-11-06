@@ -77,7 +77,7 @@ defmodule IecWeb.Layouts do
             </span>
           </span>
         </.link>
-        <nav class="hidden items-center gap-1 text-sm md:flex">
+        <nav class="hidden items-center gap-1 text-sm lg:flex">
           <.nav_link :for={{label, path, page} <- nav_items()} path={path} active={@active == page}>
             {label}
           </.nav_link>
@@ -100,7 +100,7 @@ defmodule IecWeb.Layouts do
 
     <main class={[
       "py-8 sm:py-10",
-      (@count_progress || @feed_status) && "pb-44 md:pb-32"
+      (@count_progress || @feed_status) && "pb-44 lg:pb-32"
     ]}>
       <div class={[container(), "space-y-12"]}>
         {render_slot(@inner_block)}
@@ -138,8 +138,24 @@ defmodule IecWeb.Layouts do
     ~H"""
     <footer
       id="count-footer"
+      phx-hook=".CountPulse"
       class="fixed inset-x-0 bottom-0 z-40 border-t border-base-300 bg-base-100/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl"
     >
+      <div data-pulse class="pointer-events-none absolute inset-0 bg-primary opacity-0" />
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".CountPulse">
+        // A faint wash of the accent when the count moves; restarts if updates come quickly.
+        export default {
+          mounted() {
+            const wash = this.el.querySelector("[data-pulse]")
+            this.handleEvent("count-updated", () => {
+              if (matchMedia("(prefers-reduced-motion: reduce)").matches) return
+              wash.classList.remove("count-pulse")
+              void wash.offsetWidth
+              wash.classList.add("count-pulse")
+            })
+          }
+        }
+      </script>
       <div class="pt-1.5">
         <div class="h-1 w-full bg-base-300/50">
           <div
@@ -198,7 +214,7 @@ defmodule IecWeb.Layouts do
       </div>
 
       <%!-- On phones the navigation sits here, within thumb reach. --%>
-      <nav class="grid grid-cols-5 border-t border-base-300 md:hidden" aria-label="Sections">
+      <nav class="grid grid-cols-6 border-t border-base-300 lg:hidden" aria-label="Sections">
         <.link
           :for={{label, path, page, icon} <- tab_items()}
           navigate={path}
@@ -222,6 +238,7 @@ defmodule IecWeb.Layouts do
       {"Map", ~p"/map", :map, "hero-map"},
       {"Trends", ~p"/trends", :trends, "hero-presentation-chart-line"},
       {"Movers", ~p"/movers", :movers, "hero-arrows-up-down"},
+      {"Contests", ~p"/close-contests", :contests, "hero-scale"},
       {"Changes", ~p"/changes", :changes, "hero-bolt"}
     ]
   end
@@ -297,6 +314,7 @@ defmodule IecWeb.Layouts do
       {"Map", ~p"/map", :map},
       {"Trends", ~p"/trends", :trends},
       {"Winners & losers", ~p"/movers", :movers},
+      {"Close contests", ~p"/close-contests", :contests},
       {"Changes", ~p"/changes", :changes}
     ]
   end

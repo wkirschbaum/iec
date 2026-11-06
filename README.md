@@ -67,8 +67,10 @@ To start again from nothing: `mix ecto.reset`.
   latest changes
 - `/map`: the map at province, municipality or ward level, for the whole country or one
   province: each area in its leading party's colour (stronger for a bigger lead,
-  hatched while counting), or only the areas that changed hands since 2021. Scroll, pinch
-  or use the buttons to zoom, drag to move, hover for details, click to open an area
+  hatched while counting), only the areas that changed hands since 2021, close contests
+  (shaded by the lead over the runner-up) or spoilt ballots (provinces and
+  municipalities; the IEC publishes no ward figure). Scroll, pinch or use the buttons to
+  zoom, drag to move, hover for details, click to open an area
 - `/provinces/:id`: parties vs 2021, a map of its municipalities, and each municipality's
   council control and leader, now and in 2021
 - `/municipalities/:id`: council control now and in 2021, every followed party vs 2021,
@@ -80,6 +82,10 @@ To start again from nothing: `mix ecto.reset`.
   as a small chart; 2026 is dashed while its count runs
 - `/movers`: biggest winners and losers by vote share swing, wards and council
   majorities changing hands per party, and the biggest local surges and collapses
+- `/contests`: close contests: the narrowest council contests (lead in points and votes, and
+  against 2021) as cards and a table, and every ward closest first. Ward leads come from
+  the party files' shares of all the ward's votes, so a ward whose winner trails on them
+  (some independents) is left out
 - `/changes`: every change, filterable by level
 - `/status`: the feeds, what has been imported and the server, live; `/health` gives a
   short JSON summary for uptime checks

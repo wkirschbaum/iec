@@ -167,3 +167,14 @@
     @apply rounded-box border border-base-300 bg-base-100 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-12px_rgb(0_0_0/0.08)];
   }
 }
+
+/* The footer's faint wash when the count moves (see the .CountPulse hook). */
+@keyframes count-pulse {
+  0% { opacity: 0; }
+  25% { opacity: 0.09; }
+  100% { opacity: 0; }
+}
+
+.count-pulse {
+  animation: count-pulse 1.6s ease-out;
+}

@@ -36,7 +36,15 @@ defmodule IecWeb.MapLiveTest do
             "VDsComplete" => 10,
             "VDExpected" => 10,
             "PartyBallotResults" => [
-              %{"ID" => party_id, "TotalValidVotes" => 900, "PercOfVotes" => 60.0, "IOrder" => 1},
+              %{
+                "ID" => party_id,
+                "TotalValidVotes" => 900,
+                "PercOfVotes" => 60.0,
+                "IOrder" => 1,
+                "RegisteredVoters" => 2000,
+                "TotalVotesCast" => 1020,
+                "SpoiltVotes" => 20
+              },
               %{"ID" => 99, "TotalValidVotes" => 100, "PercOfVotes" => 10.0, "IOrder" => 2}
             ]
           }
@@ -63,5 +71,34 @@ defmodule IecWeb.MapLiveTest do
     assert html =~ ~r/id="areas-municipality-3004"[^>]*fill="var\(--color-base-200\)"/
     refute html =~ ~r/id="areas-municipality-3003"[^>]*fill="var\(--color-base-200\)"/
     assert html =~ "Johannesburg: Party 52 60.0% · Party 7 before"
+  end
+
+  test "close contests mode shades each area by its lead over the runner-up", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/map")
+    html = view |> element(~s(a[href*="mode=margin"])) |> render_click()
+
+    # A 50-point lead falls in the faintest band.
+    assert html =~
+             ~r/id="areas-municipality-3003"[^>]*fill="var\(--color-primary\)"[^>]*fill-opacity="0.15"/
+
+    assert html =~ "Johannesburg: Party 52 ahead of Party 99 by 50.0 pts · 800 votes"
+    assert has_element?(view, "#map-bands", "20+ pts")
+    assert html =~ "Lead over the runner-up"
+  end
+
+  test "spoilt ballots mode shows each area's share of spoilt ballots", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/map?mode=spoilt")
+    html = render(view)
+
+    assert html =~ ~r"Johannesburg: 2\.0% spoilt · 20 of 1.020 ballots"u
+    assert html =~ ~r/id="areas-municipality-3003"[^>]*fill-opacity="0.5"/
+  end
+
+  test "wards offer no spoilt ballots mode, and fall back to the leader", %{conn: conn} do
+    {:ok, view, html} = live(conn, ~p"/map?level=wards&mode=spoilt")
+
+    refute has_element?(view, "a", "Spoilt ballots")
+    assert has_element?(view, "a", "Close contests")
+    refute html =~ "Spoilt ballots, share of ballots cast"
   end
 end

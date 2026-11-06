@@ -92,6 +92,49 @@ defmodule IecWeb.TableRows do
 
   def council_label(_control, _parties, _counting), do: nil
 
+  @doc """
+  Rows for the close council contests (`Iec.Contests.list_council_contests/0`): the two leading
+  parties by name, the change in the lead since the previous election (negative when the
+  contest tightened), and the leader's part of the two-party bar.
+  """
+  def council_contest_rows(contests, parties) do
+    for contest <- contests do
+      Map.merge(contest, %{
+        leader: party_abbreviation(parties, %{party_id: contest.leader_id}),
+        runner_up: party_abbreviation(parties, %{party_id: contest.runner_up_id}),
+        previous_leader:
+          contest.previous_leader_id &&
+            party_abbreviation(parties, %{party_id: contest.previous_leader_id}),
+        margin_change: Results.swing(contest.margin, contest.previous_margin),
+        leader_width: two_party_width(contest.leader_share, contest.runner_up_share)
+      })
+    end
+  end
+
+  @doc """
+  Rows for the close ward contests (`Iec.Contests.list_ward_contests/0`): the ward by municipality
+  and number (sorting by both), the two leading parties by name and whether it is
+  declared.
+  """
+  def ward_contest_rows(contests, parties) do
+    for contest <- contests do
+      Map.merge(contest, %{
+        ward: {contest.municipality_name || "", contest.ward_number},
+        leader: party_abbreviation(parties, %{party_id: contest.leader_id}),
+        runner_up: party_abbreviation(parties, %{party_id: contest.runner_up_id}),
+        status: if(contest.declared, do: "declared", else: "counting")
+      })
+    end
+  end
+
+  # The leader's part of a bar holding only the two leading parties, in percent.
+  defp two_party_width(leader_share, runner_up_share)
+       when is_number(leader_share) and is_number(runner_up_share) and
+              leader_share + runner_up_share > 0,
+       do: leader_share / (leader_share + runner_up_share) * 100
+
+  defp two_party_width(_leader_share, _runner_up_share), do: 50.0
+
   @doc "Adds the sortable name of the party in `field` (a party id) as `label_field`."
   def with_party_name(rows, parties, field, label_field) do
     Enum.map(rows, fn row ->
