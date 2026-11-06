@@ -61,7 +61,7 @@ defmodule IecWeb.MoversLive do
       count_progress={@count_progress}
       active={:movers}
     >
-      <.page_header eyebrow={"Since #{@previous_year}"} title="Winners &amp; losers">
+      <.page_header eyebrow={"Since #{@previous_year}"} title="Winners & losers">
         <:lede>
           Vote share swing since {@previous_year}, and the wards and council majorities that
           changed hands. Updates as the count goes on.
