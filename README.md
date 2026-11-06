@@ -4,7 +4,8 @@ An app that follows South Africa's 2026 Local Government Elections count
 live from the Electoral Commission (IEC), keeps a timestamped history of every change, and
 compares every area, party, council and ward with 2021.
 
-It is written in [Elixir](https://elixir-lang.org), with
+It is written in [Elixir](https://elixir-lang.org) ([how to install
+Elixir](https://elixir-lang.org/install.html)), with
 [Phoenix LiveView](https://www.phoenixframework.org) and PostgreSQL. It is meant to run
 on your own machine: there is no auth.
 
